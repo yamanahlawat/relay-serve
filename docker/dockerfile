@@ -1,0 +1,37 @@
+# Use the official Python image from the Docker Hub
+FROM python:3.13-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT="$(which python)" \
+    PYTHONPATH=/src
+
+# Set a directory for the src
+WORKDIR /src
+
+# Install system dependencies including gcc and python3-dev
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git wget openssh-client gcc python3-dev libgl1-mesa-dev libglib2.0-0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN pip install uv
+
+# Copy dependency files first to leverage Docker cache
+COPY pyproject.toml uv.lock ./
+
+# Install project dependencies without installing the project itself
+RUN uv pip install --system .
+
+# Copy the content of the local src directory to the working directory
+COPY . .
+
+# Ensure the entrypoint script is executable
+RUN chmod +x /src/docker/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/src/docker/entrypoint.sh"]
