@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.config import settings
+
 
 class ModelBase(BaseModel):
     """
@@ -12,9 +14,9 @@ class ModelBase(BaseModel):
 
     name: str
     is_active: bool = True
-    max_tokens: int | None = Field(default=None, gt=0)
-    temperature: float = Field(default=1.0, ge=0.0, le=2.0)
-    top_p: float = Field(default=1.0, ge=0.0, le=1.0)
+    max_tokens: int = Field(default=settings.DEFAULT_MAX_TOKENS, gt=0)
+    temperature: float = Field(default=settings.DEFAULT_TEMPERATURE, ge=0.0, le=2.0)
+    top_p: float = Field(default=settings.DEFAULT_TOP_P, ge=0.0, le=1.0)
     config: dict[str, Any] = Field(default_factory=dict)
     input_cost_per_token: float = Field(default=0.0, ge=0.0)
     output_cost_per_token: float = Field(default=0.0, ge=0.0)
@@ -47,9 +49,9 @@ class ModelUpdate(BaseModel):
     """
 
     is_active: bool | None = None
-    max_tokens: int | None = Field(None, gt=0)
-    temperature: float | None = Field(None, ge=0.0, le=2.0)
-    top_p: float | None = Field(None, ge=0.0, le=1.0)
+    max_tokens: int | None = Field(default=None, gt=0)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     config: dict[str, Any] | None = None
-    input_cost_per_token: float | None = Field(None, ge=0.0)
-    output_cost_per_token: float | None = Field(None, ge=0.0)
+    input_cost_per_token: float | None = Field(default=None, ge=0.0)
+    output_cost_per_token: float | None = Field(default=None, ge=0.0)

@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from sqlalchemy import String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -8,7 +9,7 @@ from app.database.base_class import TimeStampedBase
 from app.providers.constants import ProviderType
 
 if TYPE_CHECKING:
-    from .model import LLMModel
+    from app.providers.models.model import LLMModel
 
 
 class LLMProvider(TimeStampedBase):
@@ -17,6 +18,8 @@ class LLMProvider(TimeStampedBase):
     """
 
     __tablename__ = "llm_providers"
+
+    id: Mapped[UUID] = mapped_column(default=uuid4, primary_key=True, index=True)
 
     name: Mapped[ProviderType] = mapped_column(String(50), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)

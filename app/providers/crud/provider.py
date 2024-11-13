@@ -11,4 +11,4 @@ class CRUDProvider(CRUDBase[LLMProvider, ProviderCreate, ProviderUpdate]):
     pass
 
 
-crud_provider = CRUDProvider(LLMProvider)
+crud_provider = CRUDProvider(model=LLMProvider)

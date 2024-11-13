@@ -1,10 +1,10 @@
-from .model import (
+from app.providers.schemas.model import (
     ModelBase,
     ModelCreate,
     ModelRead,
     ModelUpdate,
 )
-from .provider import (
+from app.providers.schemas.provider import (
     ProviderBase,
     ProviderCreate,
     ProviderRead,
