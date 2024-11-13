@@ -1,0 +1,183 @@
+from typing import Sequence
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.chat.crud import crud_message, crud_session
+from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate
+from app.database.dependencies import get_db_session
+
+router = APIRouter(prefix="/messages", tags=["Chat Messages"])
+
+
+@router.post("/{session_id}/", response_model=MessageRead, status_code=status.HTTP_201_CREATED)
+async def create_message(
+    session_id: UUID,
+    message_in: MessageCreate,
+    db: AsyncSession = Depends(get_db_session),
+) -> MessageRead:
+    """
+    Create a new chat message.
+    Creates a new message in the specified chat session.
+    Args:
+        - **session_id**: UUID of the chat session
+        - **content**: Message content
+        - **role**: Message role (user/assistant/system)
+        - **parent_id**: Optional parent message ID for threading
+        - **extra_data**: Optional additional data
+    Returns:
+        The created message
+    Raises:
+        - 404: Session not found
+        - 404: Parent message not found (if parent_id provided)
+        - 400: Invalid role for message
+    """
+    # Verify session exists
+    session = await crud_session.get(db, id=session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
+
+    # Verify parent message if provided
+    if message_in.parent_id:
+        parent = await crud_message.get(db, id=message_in.parent_id)
+        if not parent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Parent message {message_in.parent_id} not found"
+            )
+        if parent.session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Parent message belongs to a different session"
+            )
+
+    message = await crud_message.create_with_session(db=db, session_id=session_id, obj_in=message_in)
+    return message
+
+
+@router.get("/{session_id}/", response_model=list[MessageRead])
+async def list_session_messages(
+    session_id: UUID,
+    offset: int = 0,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db_session),
+) -> Sequence[MessageRead]:
+    """
+    List session messages.
+    Retrieves messages from a specific chat session.
+    Args:
+        - **session_id**: UUID of the chat session
+        - **offset**: Number of messages to skip (default: 0)
+        - **limit**: Maximum number of messages to return (default: 50)
+    Returns:
+        List of messages in chronological order
+    Raises:
+        - 404: Session not found
+    """
+    # Verify session exists
+    session = await crud_session.get(db, id=session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
+
+    return await crud_message.list_by_session(db=db, session_id=session_id, offset=offset, limit=limit)
+
+
+@router.get("/{session_id}/{message_id}/", response_model=MessageRead)
+async def get_message(
+    session_id: UUID,
+    message_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> MessageRead:
+    """
+    Get message details.
+    Retrieves details of a specific message.
+    Args:
+        - **session_id**: UUID of the chat session
+        - **message_id**: UUID of the message
+    Returns:
+        The message details
+    Raises:
+        - 404: Session or message not found
+        - 400: Message doesn't belong to session
+    """
+    # Verify session exists
+    session = await crud_session.get(db, id=session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
+
+    message = await crud_message.get(db, id=message_id)
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message {message_id} not found")
+
+    if message.session_id != session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message belongs to a different session")
+
+    return message
+
+
+@router.patch("/{session_id}/{message_id}/", response_model=MessageRead)
+async def update_message(
+    session_id: UUID,
+    message_id: UUID,
+    message_in: MessageUpdate,
+    db: AsyncSession = Depends(get_db_session),
+) -> MessageRead:
+    """
+    Update message.
+    Updates the details of a specific message.
+    Args:
+        - **session_id**: UUID of the chat session
+        - **message_id**: UUID of the message
+        - **content**: Optional new content
+        - **status**: Optional new status
+        - **extra_data**: Optional data updates
+    Returns:
+        The updated message
+    Raises:
+        - 404: Session or message not found
+        - 400: Message doesn't belong to session
+    """
+    # Verify session exists
+    session = await crud_session.get(db, id=session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
+
+    message = await crud_message.get(db, id=message_id)
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message {message_id} not found")
+
+    if message.session_id != session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message belongs to a different session")
+
+    message = await crud_message.update(db=db, id=message_id, obj_in=message_in)
+    return message
+
+
+@router.delete("/{session_id}/{message_id}/", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_message(
+    session_id: UUID,
+    message_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """
+    Delete message.
+    Permanently deletes a specific message.
+    Args:
+        - **session_id**: UUID of the chat session
+        - **message_id**: UUID of the message
+    Raises:
+        - 404: Session or message not found
+        - 400: Message doesn't belong to session
+    """
+    # Verify session exists
+    session = await crud_session.get(db, id=session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
+
+    message = await crud_message.get(db, id=message_id)
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message {message_id} not found")
+
+    if message.session_id != session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message belongs to a different session")
+
+    await crud_message.delete(db, id=message_id)

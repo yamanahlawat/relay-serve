@@ -11,4 +11,4 @@ class CRUDModel(CRUDBase[LLMModel, ModelCreate, ModelUpdate]):
     pass
 
 
-crud_model = CRUDModel(LLMModel)
+crud_model = CRUDModel(model=LLMModel)
