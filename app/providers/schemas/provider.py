@@ -25,6 +25,8 @@ class ProviderCreate(ProviderBase):
 
     api_key: SecretStr = Field(min_length=1)
 
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
+
 
 class ProviderRead(ProviderBase):
     """

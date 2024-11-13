@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_DSN: PostgresDsn | None = None
 
+    # Default LLM Params
+    DEFAULT_TEMPERATURE: float = 0.7
+    DEFAULT_TOP_P: float = 0.9
+    DEFAULT_MAX_TOKENS: int = 1024
+
     @field_validator("POSTGRES_DSN", mode="after")
     def assemble_db_connection(cls, value: PostgresDsn | None, info: ValidationInfo) -> PostgresDsn:
         """
