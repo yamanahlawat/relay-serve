@@ -1,0 +1,122 @@
+from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.dependencies import get_session
+from app.providers.crud.model import crud_model
+from app.providers.crud.provider import crud_provider
+from app.providers.schemas.model import ModelCreate, ModelRead, ModelUpdate
+
+router = APIRouter(prefix="/models", tags=["Models"])
+
+
+@router.post("/", response_model=ModelRead, status_code=status.HTTP_201_CREATED)
+async def create_model(
+    model_in: ModelCreate,
+    session: AsyncSession = Depends(get_session),
+) -> ModelRead:
+    """
+    Create a new LLM model configuration.
+    """
+    # Verify provider exists
+    provider = await crud_provider.get(session=session, id=model_in.provider_id)
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id {model_in.provider_id} not found",
+        )
+
+    # Check if model with same name exists for this provider
+    filters = [crud_model.model.provider_id == model_in.provider_id, crud_model.model.name == model_in.name]
+    existing_model = await crud_model.filter(
+        session=session,
+        filters=filters,
+    )
+    if existing_model:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Model {model_in.name} already exists for this provider",
+        )
+
+    model = await crud_model.create(session=session, obj_in=model_in)
+    return model
+
+
+@router.get("/", response_model=List[ModelRead])
+async def list_models(
+    session: AsyncSession = Depends(get_session),
+    provider_id: UUID | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> List[ModelRead]:
+    """
+    List all LLM models, optionally filtered by provider.
+    """
+    if provider_id:
+        filters = [crud_model.model.provider_id == provider_id]
+        models = await crud_model.filter(
+            session=session,
+            filters=filters,
+            offset=offset,
+            limit=limit,
+        )
+    else:
+        models = await crud_model.filter(session=session, offset=offset, limit=limit)
+    return models
+
+
+@router.get("/{model_id}", response_model=ModelRead)
+async def get_model(
+    model_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ModelRead:
+    """
+    Get a specific LLM model by ID.
+    """
+    model = await crud_model.get(session=session, id=model_id)
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model with id {model_id} not found",
+        )
+    return model
+
+
+@router.patch("/{model_id}", response_model=ModelRead)
+async def update_model(
+    model_id: UUID,
+    model_in: ModelUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> ModelRead:
+    """
+    Update a specific LLM model configuration.
+    """
+    model = await crud_model.get(session=session, id=model_id)
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model with id {model_id} not found",
+        )
+
+    model = await crud_model.update(session=session, id=model_id, obj_in=model_in)
+    return model
+
+
+@router.delete("/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model(
+    model_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """
+    Delete a specific LLM model configuration.
+    """
+    model = await crud_model.get(session=session, id=model_id)
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model with id {model_id} not found",
+        )
+
+    await crud_model.delete(session=session, id=model_id)
