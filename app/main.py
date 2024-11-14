@@ -8,5 +8,5 @@ relay = FastAPI(
     description="Simple yet effective open source LLM Studio.",
 )
 
-
+# Include API router
 relay.include_router(router=api_router, prefix=settings.API_URL)

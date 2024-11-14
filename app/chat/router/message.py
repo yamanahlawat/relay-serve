@@ -18,20 +18,23 @@ async def create_message(
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageRead:
     """
-    Create a new chat message.
+    ## Create a New Chat Message
     Creates a new message in the specified chat session.
-    Args:
-        - **session_id**: UUID of the chat session
-        - **content**: Message content
-        - **role**: Message role (user/assistant/system)
-        - **parent_id**: Optional parent message ID for threading
-        - **extra_data**: Optional additional data
-    Returns:
-        The created message
-    Raises:
-        - 404: Session not found
-        - 404: Parent message not found (if parent_id provided)
-        - 400: Invalid role for message
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **content**: Message content
+    - **role**: Message role (user/assistant/system)
+    - **parent_id**: Optional parent message ID for threading
+    - **extra_data**: Optional additional data
+
+    ### Returns
+    The created message
+
+    ### Raises
+    - **404**: Session not found
+    - **404**: Parent message not found (if parent_id provided)
+    - **400**: Invalid role for message
     """
     # Verify session exists
     session = await crud_session.get(db, id=session_id)
@@ -62,16 +65,19 @@ async def list_session_messages(
     db: AsyncSession = Depends(get_db_session),
 ) -> Sequence[MessageRead]:
     """
-    List session messages.
+    ## List Session Messages
     Retrieves messages from a specific chat session.
-    Args:
-        - **session_id**: UUID of the chat session
-        - **offset**: Number of messages to skip (default: 0)
-        - **limit**: Maximum number of messages to return (default: 50)
-    Returns:
-        List of messages in chronological order
-    Raises:
-        - 404: Session not found
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **offset**: Number of messages to skip (default: 0)
+    - **limit**: Maximum number of messages to return (default: 50)
+
+    ### Returns
+    List of messages in chronological order
+
+    ### Raises
+    - **404**: Session not found
     """
     # Verify session exists
     session = await crud_session.get(db, id=session_id)
@@ -88,16 +94,19 @@ async def get_message(
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageRead:
     """
-    Get message details.
+    ## Get Message Details
     Retrieves details of a specific message.
-    Args:
-        - **session_id**: UUID of the chat session
-        - **message_id**: UUID of the message
-    Returns:
-        The message details
-    Raises:
-        - 404: Session or message not found
-        - 400: Message doesn't belong to session
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **message_id**: UUID of the message
+
+    ### Returns
+    The message details
+
+    ### Raises
+    - **404**: Session or message not found
+    - **400**: Message doesn't belong to session
     """
     # Verify session exists
     session = await crud_session.get(db, id=session_id)
@@ -122,19 +131,22 @@ async def update_message(
     db: AsyncSession = Depends(get_db_session),
 ) -> MessageRead:
     """
-    Update message.
+    ## Update Message
     Updates the details of a specific message.
-    Args:
-        - **session_id**: UUID of the chat session
-        - **message_id**: UUID of the message
-        - **content**: Optional new content
-        - **status**: Optional new status
-        - **extra_data**: Optional data updates
-    Returns:
-        The updated message
-    Raises:
-        - 404: Session or message not found
-        - 400: Message doesn't belong to session
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **message_id**: UUID of the message
+    - **content**: Optional new content
+    - **status**: Optional new status
+    - **extra_data**: Optional data updates
+
+    ### Returns
+    The updated message
+
+    ### Raises
+    - **404**: Session or message not found
+    - **400**: Message doesn't belong to session
     """
     # Verify session exists
     session = await crud_session.get(db, id=session_id)
@@ -159,14 +171,16 @@ async def delete_message(
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """
-    Delete message.
+    ## Delete Message
     Permanently deletes a specific message.
-    Args:
-        - **session_id**: UUID of the chat session
-        - **message_id**: UUID of the message
-    Raises:
-        - 404: Session or message not found
-        - 400: Message doesn't belong to session
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **message_id**: UUID of the message
+
+    ### Raises
+    - **404**: Session or message not found
+    - **400**: Message doesn't belong to session
     """
     # Verify session exists
     session = await crud_session.get(db, id=session_id)
