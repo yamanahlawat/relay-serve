@@ -14,15 +14,6 @@ class LLMProviderBase(ABC):
         self.provider = provider
 
     @abstractmethod
-    async def validate_connection(self) -> bool:
-        """
-        Validate connection to the provider.
-        Returns:
-            bool: True if connection is valid, False otherwise
-        """
-        pass
-
-    @abstractmethod
     async def generate(
         self,
         prompt: str,

@@ -18,18 +18,22 @@ async def create_chat_session(
     db: AsyncSession = Depends(get_db_session),
 ) -> SessionRead:
     """
+    ## Create Chat Session
     Creates a new chat session with the specified provider and model.
-    Args:
-        - **title**: Session title (1-255 chars)
-        - **system_context**: Optional system instructions
-        - **provider_id**: UUID of the LLM provider
-        - **llm_model_id**: UUID of the model to use
-        - **extra_data**: Optional additional data
-    Returns:
-        The created chat session
-    Raises:
-        - 404: Provider or model not found
-        - 400: Invalid provider/model combination
+
+    ### Parameters
+    - **title**: Session title (1-255 chars)
+    - **system_context**: Optional system instructions
+    - **provider_id**: UUID of the LLM provider
+    - **llm_model_id**: UUID of the model to use
+    - **extra_data**: Optional additional data
+
+    ### Returns
+    The created chat session
+
+    ### Raises
+    - **404**: Provider or model not found
+    - **400**: Invalid provider/model combination
     """
     # Verify provider exists
     provider = await crud_provider.get(db=db, id=session_in.provider_id)
@@ -58,13 +62,18 @@ async def list_chat_sessions(
     db: AsyncSession = Depends(get_db_session),
 ) -> Sequence[SessionRead]:
     """
-    List chat sessions.
-    Retrieves a paginated list of chat sessions, ordered by last message time.
-    Args:
-        - **offset**: Number of sessions to skip (default: 0)
-        - **limit**: Maximum number of sessions to return (default: 10)
-    Returns:
-        List of chat sessions
+    ## List Chat Sessions
+    Retrieves a list of all chat sessions.
+
+    ### Parameters
+    - **offset**: Number of sessions to skip (default: 0)
+    - **limit**: Maximum number of sessions to return (default: 50)
+
+    ### Returns
+    List of chat sessions
+
+    ### Raises
+    - **400**: Invalid request parameters
     """
     return await crud_session.filter(db=db, offset=offset, limit=limit)
 
@@ -75,14 +84,17 @@ async def get_chat_session(
     db: AsyncSession = Depends(get_db_session),
 ) -> SessionRead:
     """
-    Get chat session details.
+    ## Get Chat Session
     Retrieves details of a specific chat session.
-    Args:
-        - **session_id**: UUID of the session
-    Returns:
-        The chat session details
-    Raises:
-        - 404: Session not found
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+
+    ### Returns
+    The chat session details
+
+    ### Raises
+    - **404**: Session not found
     """
     session = await crud_session.get(db=db, id=session_id)
     if not session:
@@ -97,18 +109,21 @@ async def update_chat_session(
     db: AsyncSession = Depends(get_db_session),
 ) -> SessionRead:
     """
-    Update chat session.
+    ## Update Chat Session
     Updates the details of a specific chat session.
-    Args:
-        - **session_id**: UUID of the session
-        - **title**: Optional new title
-        - **status**: Optional new status
-        - **system_context**: Optional new system context
-        - **extra_data**: Optional data updates
-    Returns:
-        The updated chat session
-    Raises:
-        - 404: Session not found
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **title**: Optional new title
+    - **system_context**: Optional new system instructions
+    - **extra_data**: Optional additional data
+
+    ### Returns
+    The updated chat session
+
+    ### Raises
+    - **404**: Session not found
+    - **400**: Invalid request parameters
     """
     session = await crud_session.get(db=db, id=session_id)
     if not session:
@@ -124,12 +139,14 @@ async def delete_chat_session(
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """
-    Delete chat session.
-    Permanently deletes a chat session and all its messages.
-    Args:
-        - **session_id**: UUID of the session to delete
-    Raises:
-        - 404: Session not found
+    ## Delete Chat Session
+    Permanently deletes a specific chat session.
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+
+    ### Raises
+    - **404**: Session not found
     """
     session = await crud_session.get(db=db, id=session_id)
     if not session:

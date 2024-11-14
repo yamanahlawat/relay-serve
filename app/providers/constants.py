@@ -65,3 +65,13 @@ class OpenAIModelName(BaseEnum):
     def default_models(cls) -> list[str]:
         """Get default enabled models"""
         return [cls.GPT_4O.value, cls.GPT_4O_MINI.value]
+
+
+class ProviderErrorCode(BaseEnum):
+    """
+    Error codes for provider operations
+    """
+
+    CONNECTION = "connection_error"
+    RATE_LIMIT = "rate_limit_error"
+    API = "api_error"
