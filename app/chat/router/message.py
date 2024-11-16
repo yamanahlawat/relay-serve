@@ -84,7 +84,10 @@ async def list_session_messages(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
 
-    return await crud_message.list_by_session(db=db, session_id=session_id, offset=offset, limit=limit)
+    messages = await crud_message.list_by_session(db=db, session_id=session_id, offset=offset, limit=limit)
+    for message in messages:
+        message.usage = message.get_usage()
+    return messages
 
 
 @router.get("/{session_id}/{message_id}/", response_model=MessageRead)
@@ -120,6 +123,8 @@ async def get_message(
     if message.session_id != session_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message belongs to a different session")
 
+    # Get usage metrics
+    message.usage = message.get_usage()
     return message
 
 

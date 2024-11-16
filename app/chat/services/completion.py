@@ -113,7 +113,6 @@ class ChatCompletionService:
         self,
         chat_session: ChatSession,
         current_message_id: UUID,
-        limit: int = 10,
     ) -> Sequence[ChatMessage]:
         """
         Get recent conversation history for context
@@ -122,7 +121,6 @@ class ChatCompletionService:
             db=self.db,
             session_id=chat_session.id,
             exclude_message_id=current_message_id,
-            limit=limit,
         )
 
     async def generate_stream(
@@ -148,6 +146,7 @@ class ChatCompletionService:
         async for chunk, is_final in provider_client.generate_stream(
             prompt=request.prompt,
             model=model.name,
+            system_context=chat_session.system_context,
             messages=history,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
@@ -201,6 +200,7 @@ class ChatCompletionService:
         content, input_tokens, output_tokens = await provider_client.generate(
             prompt=request.prompt,
             model=model.name,
+            system_context=chat_session.system_context,
             messages=history,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
