@@ -75,3 +75,4 @@ class ProviderErrorCode(BaseEnum):
     CONNECTION = "connection_error"
     RATE_LIMIT = "rate_limit_error"
     API = "api_error"
+    CONFIGURATION = "configuration_error"

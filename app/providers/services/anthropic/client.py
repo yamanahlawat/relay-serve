@@ -1,15 +1,27 @@
 from typing import AsyncGenerator, Sequence
 
-from anthropic import APIConnectionError, APIError, AsyncAnthropic, RateLimitError
+from anthropic import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    AsyncAnthropic,
+    AuthenticationError,
+    RateLimitError,
+)
 from anthropic.types import MessageParam
-from fastapi import HTTPException, status
 from loguru import logger
 
 from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.core.config import settings
 from app.providers.base import LLMProviderBase
-from app.providers.constants import ClaudeModelName, ProviderErrorCode
+from app.providers.constants import ClaudeModelName
+from app.providers.exceptions import (
+    ProviderAPIError,
+    ProviderConfigurationError,
+    ProviderConnectionError,
+    ProviderRateLimitError,
+)
 from app.providers.models import LLMProvider
 
 
@@ -53,6 +65,7 @@ class AnthropicProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
+        system_context: str = "",
         messages: Sequence[ChatMessage] | None = None,
         max_tokens: int = settings.DEFAULT_MAX_TOKENS,
         temperature: float = settings.DEFAULT_TEMPERATURE,
@@ -76,6 +89,7 @@ class AnthropicProvider(LLMProviderBase):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=message_params,
+                system=system_context,
             ) as stream:
                 async for text in stream.text_stream:
                     # Not final chunk
@@ -88,43 +102,45 @@ class AnthropicProvider(LLMProviderBase):
                 yield ("", True)
 
         except APIConnectionError as error:
-            logger.exception("Anthropic API connection error during generation")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": ProviderErrorCode.CONNECTION,
-                    "message": "Failed to connect to Anthropic API",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+            logger.exception("Anthropic API connection error during stream generation")
+            raise ProviderConnectionError(
+                provider=self.provider_type,
+                error=str(error),
             )
         except RateLimitError as error:
-            logger.exception("Anthropic API rate limit exceeded")
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": ProviderErrorCode.RATE_LIMIT,
-                    "message": "Rate limit exceeded",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+            logger.exception("Anthropic API rate limit exceeded during stream generation")
+            raise ProviderRateLimitError(
+                provider=self.provider_type,
+                error=str(error),
+            )
+        except AuthenticationError as error:
+            logger.exception("Anthropic authentication error during stream generation")
+            raise ProviderConfigurationError(
+                provider=self.provider_type,
+                message="Invalid API credentials",
+                error=str(error),
+            )
+        except APIStatusError as error:
+            logger.exception("Anthropic API status error during stream generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
+                status_code=error.status_code,
+                message=error.message,
+                error=str(error),
             )
         except APIError as error:
-            logger.exception("Anthropic API error during generation")
-            raise HTTPException(
+            logger.exception("Anthropic API error during stream generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
                 status_code=getattr(error, "status_code", 500),
-                detail={
-                    "code": ProviderErrorCode.API,
-                    "message": "Anthropic API error",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+                error=str(error),
             )
 
     async def generate(
         self,
         prompt: str,
         model: str,
+        system_context: str = "",
         messages: Sequence[ChatMessage] | None = None,
         max_tokens: int = settings.DEFAULT_MAX_TOKENS,
         temperature: float = settings.DEFAULT_TEMPERATURE,
@@ -148,6 +164,7 @@ class AnthropicProvider(LLMProviderBase):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=message_params,
+                system=system_context,
             )
             self._last_usage = response.usage
             generated_text = response.content[0].text if response.content else ""
@@ -158,37 +175,38 @@ class AnthropicProvider(LLMProviderBase):
             )
 
         except APIConnectionError as error:
-            logger.exception("Anthropic API connection error during generation")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": ProviderErrorCode.CONNECTION,
-                    "message": "Failed to connect to Anthropic API",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+            logger.exception("Anthropic API connection error during stream generation")
+            raise ProviderConnectionError(
+                provider=self.provider_type,
+                error=str(error),
             )
         except RateLimitError as error:
-            logger.exception("Anthropic API rate limit exceeded")
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": ProviderErrorCode.RATE_LIMIT,
-                    "message": "Rate limit exceeded",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+            logger.exception("Anthropic API rate limit exceeded during stream generation")
+            raise ProviderRateLimitError(
+                provider=self.provider_type,
+                error=str(error),
+            )
+        except AuthenticationError as error:
+            logger.exception("Anthropic authentication error during stream generation")
+            raise ProviderConfigurationError(
+                provider=self.provider_type,
+                message="Invalid API credentials",
+                error=str(error),
+            )
+        except APIStatusError as error:
+            logger.exception("Anthropic API status error during stream generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
+                status_code=error.status_code,
+                message=error.message,
+                error=str(error),
             )
         except APIError as error:
-            logger.exception("Anthropic API error during generation")
-            raise HTTPException(
+            logger.exception("Anthropic API error during stream generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
                 status_code=getattr(error, "status_code", 500),
-                detail={
-                    "code": ProviderErrorCode.API,
-                    "message": "Anthropic API error",
-                    "provider": "anthropic",
-                    "details": str(error),
-                },
+                error=str(error),
             )
 
     @classmethod
