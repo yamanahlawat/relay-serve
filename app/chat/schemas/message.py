@@ -36,7 +36,7 @@ class MessageRead(BaseModel):
     status: MessageStatus
     parent_id: UUID | None
     created_at: datetime
-    usage: ChatUsage | None = None
+    usage: ChatUsage
     error_code: str | None = None
     error_message: str | None = None
     extra_data: dict[str, Any]

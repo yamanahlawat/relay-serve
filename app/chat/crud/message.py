@@ -71,8 +71,7 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         db: AsyncSession,
         session_id: UUID,
         exclude_message_id: UUID | None = None,
-        limit: int = 10,
-    ) -> list[ChatMessage]:
+    ) -> Sequence[ChatMessage]:
         """
         Get recent context messages for a chat session.
         Args:
@@ -82,21 +81,19 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         Returns:
             List of recent messages for context
         """
-        query = select(self.model).where(
+        conditions = [
             self.model.session_id == session_id,
             self.model.role.in_([MessageRole.USER, MessageRole.ASSISTANT]),
             self.model.status == MessageStatus.COMPLETED,
-        )
+        ]
 
         if exclude_message_id:
-            query = query.where(self.model.id != exclude_message_id)
+            conditions.append(self.model.id != exclude_message_id)
 
-        query = query.order_by(self.model.created_at.desc()).limit(limit)
+        query = select(self.model).where(*conditions).order_by(self.model.created_at.asc())
 
         result = await db.execute(query)
-        messages = result.scalars().all()
-        # Return in chronological order
-        return list(reversed(messages))
+        return result.scalars().all()
 
     async def mark_failed(self, db: AsyncSession, id: UUID, error_code: str, error_message: str) -> ChatMessage | None:
         """

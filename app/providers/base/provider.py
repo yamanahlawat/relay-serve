@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 
 from app.core.config import settings
+from app.providers.constants import ProviderType
 from app.providers.models import LLMProvider
 
 
@@ -12,6 +13,7 @@ class LLMProviderBase(ABC):
 
     def __init__(self, provider: LLMProvider) -> None:
         self.provider = provider
+        self.provider_type = ProviderType(provider.name)
 
     @abstractmethod
     async def generate(
