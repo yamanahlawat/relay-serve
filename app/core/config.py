@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     # List of allowed CORS origins
     ALLOWED_CORS_ORIGINS: list[HttpUrl] = []
 
+    # Sentry Configuration
+    SENTRY_DSN: HttpUrl | None = None
+
+    # Langfuse Configuration
+    LANGFUSE_HOST: str | None = "http://langfuse:3000"
+    LANGFUSE_SECRET_KEY: SecretStr | None = None
+    LANGFUSE_PUBLIC_KEY: str | None = None
+
     # Database Settings
     POSTGRES_HOST: str
     POSTGRES_USER: str
