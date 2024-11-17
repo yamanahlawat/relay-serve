@@ -13,6 +13,8 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "greenlet>=3.1.1",
     "loguru>=0.7.2",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.18.0",
+    "langfuse>=2.53.9",
 ]
 
 [dependency-groups]

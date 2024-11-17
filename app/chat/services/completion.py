@@ -2,6 +2,7 @@ from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from langfuse.decorators import langfuse_context, observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus
@@ -123,6 +124,31 @@ class ChatCompletionService:
             exclude_message_id=current_message_id,
         )
 
+    def update_langfuse_observation(
+        self,
+        chat_session: ChatSession,
+        assistant_message: ChatMessage,
+    ) -> None:
+        """
+        Update the current observation in Langfuse context
+        """
+        # Get usage details
+        usage = assistant_message.get_usage()
+
+        # Update the observation with output details
+        langfuse_context.update_current_observation(
+            output=assistant_message.content,
+            session_id=str(chat_session.id),
+            usage={
+                "input": usage["input_tokens"],
+                "output": usage["output_tokens"],
+                "input_cost": usage["input_cost"],
+                "output_cost": usage["output_cost"],
+                "total_cost": usage["total_cost"],
+            },
+        )
+
+    @observe(name="streaming", as_type="generation")
     async def generate_stream(
         self,
         chat_session: ChatSession,
@@ -179,6 +205,10 @@ class ChatCompletionService:
                     model=model,
                 )
 
+                # Update Langfuse context with the assistant message
+                self.update_langfuse_observation(chat_session=chat_session, assistant_message=assistant_message)
+
+    @observe(name="non_streaming", as_type="generation")
     async def generate_complete(
         self,
         chat_session: ChatSession,
@@ -225,6 +255,9 @@ class ChatCompletionService:
             output_tokens=output_tokens,
             model=model,
         )
+
+        # Update Langfuse context with the assistant message
+        self.update_langfuse_observation(chat_session=chat_session, assistant_message=assistant_message)
 
         return ChatResponse(
             content=content,
