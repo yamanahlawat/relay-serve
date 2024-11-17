@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 240">
+  <!-- Background -->
+  <rect width="1280" height="240" fill="#0f172a"/>
+
+  <!-- Grid Pattern -->
+  <g stroke="#4F46E5" stroke-width="1" opacity="0.12" transform="translate(260, 0)">
+    <line x1="500" y1="40" x2="500" y2="200"/>
+    <line x1="700" y1="40" x2="700" y2="200"/>
+    <line x1="900" y1="40" x2="900" y2="200"/>
+    <line x1="1100" y1="40" x2="1100" y2="200"/>
+    <line x1="400" y1="60" x2="1200" y2="60"/>
+    <line x1="400" y1="120" x2="1200" y2="120"/>
+    <line x1="400" y1="180" x2="1200" y2="180"/>
+  </g>
+
+  <!-- Logo Section -->
+  <g transform="translate(250, 120)">
+    <!-- Neural Network -->
+    <g transform="scale(1.2)">
+      <!-- Connection Lines -->
+      <g stroke-width="2" opacity="0.3">
+        <!-- Layer 1 to 2 -->
+        <line x1="-40" y1="-30" x2="0" y2="-15" stroke="#4F46E5"/>
+        <line x1="-40" y1="-30" x2="0" y2="0" stroke="#4F46E5"/>
+        <line x1="-40" y1="-30" x2="0" y2="15" stroke="#4F46E5"/>
+
+        <line x1="-40" y1="0" x2="0" y2="-15" stroke="#818CF8"/>
+        <line x1="-40" y1="0" x2="0" y2="0" stroke="#818CF8"/>
+        <line x1="-40" y1="0" x2="0" y2="15" stroke="#818CF8"/>
+
+        <line x1="-40" y1="30" x2="0" y2="-15" stroke="#C7D2FE"/>
+        <line x1="-40" y1="30" x2="0" y2="0" stroke="#C7D2FE"/>
+        <line x1="-40" y1="30" x2="0" y2="15" stroke="#C7D2FE"/>
+
+        <!-- Layer 2 to 3 -->
+        <line x1="0" y1="-15" x2="40" y2="-30" stroke="#4F46E5"/>
+        <line x1="0" y1="-15" x2="40" y2="0" stroke="#4F46E5"/>
+        <line x1="0" y1="-15" x2="40" y2="30" stroke="#4F46E5"/>
+
+        <line x1="0" y1="0" x2="40" y2="-30" stroke="#818CF8"/>
+        <line x1="0" y1="0" x2="40" y2="0" stroke="#818CF8"/>
+        <line x1="0" y1="0" x2="40" y2="30" stroke="#818CF8"/>
+
+        <line x1="0" y1="15" x2="40" y2="-30" stroke="#C7D2FE"/>
+        <line x1="0" y1="15" x2="40" y2="0" stroke="#C7D2FE"/>
+        <line x1="0" y1="15" x2="40" y2="30" stroke="#C7D2FE"/>
+      </g>
+
+      <!-- Flowing Particles -->
+      <circle r="2" fill="#4F46E5">
+        <animateMotion
+          path="M-40,-30 L0,-15 L40,0"
+          dur="1.5s"
+          repeatCount="indefinite">
+          <animate attributeName="opacity" values="0;1;0" dur="1.5s" repeatCount="indefinite"/>
+        </animateMotion>
+      </circle>
+
+      <circle r="2" fill="#818CF8">
+        <animateMotion
+          path="M-40,0 L0,0 L40,30"
+          dur="2s"
+          repeatCount="indefinite">
+          <animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite"/>
+        </animateMotion>
+      </circle>
+
+      <circle r="2" fill="#C7D2FE">
+        <animateMotion
+          path="M-40,30 L0,15 L40,-30"
+          dur="1.8s"
+          repeatCount="indefinite">
+          <animate attributeName="opacity" values="0;1;0" dur="1.8s" repeatCount="indefinite"/>
+        </animateMotion>
+      </circle>
+
+      <!-- Nodes -->
+      <!-- Layer 1 -->
+      <circle cx="-40" cy="-30" r="4" fill="#4F46E5"/>
+      <circle cx="-40" cy="0" r="4" fill="#818CF8"/>
+      <circle cx="-40" cy="30" r="4" fill="#C7D2FE"/>
+
+      <!-- Layer 2 -->
+      <circle cx="0" cy="-15" r="4" fill="#4F46E5"/>
+      <circle cx="0" cy="0" r="4" fill="#818CF8"/>
+      <circle cx="0" cy="15" r="4" fill="#C7D2FE"/>
+
+      <!-- Layer 3 -->
+      <circle cx="40" cy="-30" r="4" fill="#4F46E5"/>
+      <circle cx="40" cy="0" r="4" fill="#818CF8"/>
+      <circle cx="40" cy="30" r="4" fill="#C7D2FE"/>
+    </g>
+  </g>
+
+  <!-- Title Section -->
+  <g transform="translate(400, 130)">
+    <text x="0" y="0" font-family="Arial, sans-serif" font-size="84" font-weight="700" fill="#ffffff" letter-spacing="4">
+      RELAY
+    </text>
+    <text x="0" y="40" font-family="Arial, sans-serif" font-size="24" fill="#818CF8">
+      Simple yet effective open source LLM Studio
+    </text>
+  </g>
+</svg>

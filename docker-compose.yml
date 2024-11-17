@@ -1,21 +1,92 @@
 services:
+  # Relay
   relay:
     build:
       context: .
       dockerfile: docker/dockerfile
     env_file:
       - .env
+    # Uncomment the following line to run the relay in development mode
     entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
       - ./:/src
     ports:
-      - 8000:8000
+      - ${RELAY_PORT:-8000}:8000
     depends_on:
-      - db
-      - cache
+      relay_db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
 
-  # PostgreSQL service
-  db:
+  # Relay PostgreSQL
+  relay_db:
+    image: postgres:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-relay_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_super_secret_password}
+      POSTGRES_DB: ${POSTGRES_DB:-relay_db}
+    ports:
+      - ${RELAY_DB_PORT:-5420}:5432
+    volumes:
+      - relay_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-relay_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Dragonfly cache
+  cache:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    restart: always
+    ulimits:
+      memlock: -1
+    ports:
+      - ${CACHE_PORT:-6379}:6379
+    volumes:
+      - cache_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Insight
+  redis_insight:
+    image: redislabs/redisinsight:latest
+    ports:
+      - ${REDIS_INSIGHT_PORT:-5540}:5540
+    volumes:
+      - redis_insight_db:/db
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+
+  # Langfuse
+  langfuse:
+    image: langfuse/langfuse:latest
+    ports:
+      - ${LANGFUSE_PORT:-4200}:3000
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@langfuse_db:5432/${LANGFUSE_DB}
+      - NEXTAUTH_SECRET=${LANGFUSE_AUTH_SECRET}
+      - SALT=${LANGFUSE_SALT}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
+      - NEXTAUTH_URL=http://localhost:3000
+      - TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-true}
+      - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+    depends_on:
+      langfuse_db:
+        condition: service_healthy
+
+  # Langfuse PostgreSQL
+  langfuse_db:
     image: postgres:latest
     restart: always
     env_file:
@@ -23,36 +94,22 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: ${LANGFUSE_DB}
     ports:
-      - 5420:5432
+      - ${LANGFUSE_DB_PORT:-5421}:5432
     volumes:
-      - relay_db:/var/lib/postgresql/data
-
-  # Dragonfly cache service
-  cache:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly
-    restart: always
-    ulimits:
-      memlock: -1
-    ports:
-      - 6379:6379
-    volumes:
-      - dragonfly:/data
-
-  # RedisInsight
-  redisinsight:
-    image: redislabs/redisinsight:latest
-    ports:
-      - 5540:5540
-    volumes:
-      - redisinsight:/db
-    restart: always
-    depends_on:
-      - cache
-
+      - langfuse_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   relay_db:
-  dragonfly:
-  redisinsight:
+  cache_data:
+  redis_insight_db:
+  langfuse_db:
+
+networks:
+  relay_network:

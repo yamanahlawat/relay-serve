@@ -156,8 +156,7 @@ class AnthropicProvider(LLMProviderBase):
         Returns:
             Tuple of (generated text, input tokens, output tokens)
         """
-        message_params = self._prepare_messages(messages or [], prompt)
-
+        message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
         try:
             response = await self._client.messages.create(
                 model=model,

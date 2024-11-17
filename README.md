@@ -1,3 +1,6 @@
+![Relay Github Header](./relay.svg)
+
+
 # Relay Serve - Simple yet effective open source LLM Studio.
 
 Relay is an open-source platform for interacting with Large Language Models (LLMs), designed to provide a unified interface for both local and cloud-based models. It supports project-specific knowledge bases and configurable search integrations.
