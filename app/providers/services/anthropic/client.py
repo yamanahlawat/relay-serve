@@ -9,6 +9,7 @@ from anthropic import (
     RateLimitError,
 )
 from anthropic.types import MessageParam
+from langfuse.decorators import langfuse_context, observe
 from loguru import logger
 
 from app.chat.constants import MessageRole
@@ -31,6 +32,7 @@ class AnthropicProvider(LLMProviderBase):
     """
 
     MAX_RETRIES = 3
+    TIMEOUT = 60.0
 
     def __init__(self, provider: LLMProvider) -> None:
         super().__init__(provider)
@@ -38,6 +40,7 @@ class AnthropicProvider(LLMProviderBase):
             api_key=self.provider.api_key,
             base_url=self.provider.base_url or None,
             max_retries=self.MAX_RETRIES,
+            timeout=self.TIMEOUT,
         )
         self._last_usage = None
 
@@ -52,15 +55,55 @@ class AnthropicProvider(LLMProviderBase):
         """
         message_params = [
             MessageParam(
-                role=MessageRole.ASSISTANT.value if msg.role == MessageRole.ASSISTANT else MessageRole.USER.value,
-                content=msg.content,
+                role=MessageRole.ASSISTANT.value if message.role == MessageRole.ASSISTANT else MessageRole.USER.value,
+                content=message.content,
             )
-            for msg in messages
+            for message in messages
         ]
         # Add the new prompt
         message_params.append(MessageParam(role=MessageRole.USER.value, content=new_prompt))
         return message_params
 
+    def _handle_api_error(self, error: APIError) -> None:
+        """
+        Handle Anthropic API errors and raise appropriate provider exceptions.
+        """
+        if isinstance(error, APIConnectionError):
+            logger.exception("Anthropic API connection error during generation")
+            raise ProviderConnectionError(
+                provider=self.provider_type,
+                error=str(error),
+            )
+        elif isinstance(error, RateLimitError):
+            logger.exception("Anthropic API rate limit exceeded during generation")
+            raise ProviderRateLimitError(
+                provider=self.provider_type,
+                error=str(error),
+            )
+        elif isinstance(error, AuthenticationError):
+            logger.exception("Anthropic authentication error during generation")
+            raise ProviderConfigurationError(
+                provider=self.provider_type,
+                message="Invalid API credentials",
+                error=str(error),
+            )
+        elif isinstance(error, APIStatusError):
+            logger.exception("Anthropic API status error during generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
+                status_code=error.status_code,
+                message=error.message,
+                error=str(error),
+            )
+        elif isinstance(error, APIError):
+            logger.exception("Anthropic API error during generation")
+            raise ProviderAPIError(
+                provider=self.provider_type,
+                status_code=getattr(error, "status_code", 500),
+                error=str(error),
+            )
+
+    @observe(as_type="generation")
     async def generate_stream(
         self,
         prompt: str,
@@ -98,44 +141,35 @@ class AnthropicProvider(LLMProviderBase):
                 # After stream is complete, get final message with usage info
                 final_message = await stream.get_final_message()
                 self._last_usage = final_message.usage
+
+                # Update Langfuse observation with usage details
+                langfuse_context.update_current_observation(
+                    model=model,
+                    input=prompt,
+                    output=final_message.content,
+                    model_parameters={
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    },
+                    usage={
+                        "input": self._last_usage.input_tokens,
+                        "output": self._last_usage.output_tokens,
+                    },
+                )
+
                 # Signal completion with empty text and final flag
                 yield ("", True)
 
-        except APIConnectionError as error:
-            logger.exception("Anthropic API connection error during stream generation")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error=str(error),
-            )
-        except RateLimitError as error:
-            logger.exception("Anthropic API rate limit exceeded during stream generation")
-            raise ProviderRateLimitError(
-                provider=self.provider_type,
-                error=str(error),
-            )
-        except AuthenticationError as error:
-            logger.exception("Anthropic authentication error during stream generation")
-            raise ProviderConfigurationError(
-                provider=self.provider_type,
-                message="Invalid API credentials",
-                error=str(error),
-            )
-        except APIStatusError as error:
-            logger.exception("Anthropic API status error during stream generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=error.status_code,
-                message=error.message,
-                error=str(error),
-            )
-        except APIError as error:
-            logger.exception("Anthropic API error during stream generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=getattr(error, "status_code", 500),
-                error=str(error),
-            )
+        except (
+            APIConnectionError,
+            RateLimitError,
+            AuthenticationError,
+            APIStatusError,
+            APIError,
+        ) as error:
+            self._handle_api_error(error)
 
+    @observe(as_type="generation")
     async def generate(
         self,
         prompt: str,
@@ -167,59 +201,51 @@ class AnthropicProvider(LLMProviderBase):
             )
             self._last_usage = response.usage
             generated_text = response.content[0].text if response.content else ""
-            return (
-                generated_text,
-                response.usage.input_tokens,
-                response.usage.output_tokens,
+
+            # Update Langfuse observation with usage details
+            langfuse_context.update_current_observation(
+                model=model,
+                input=prompt,
+                output=generated_text,
+                model_parameters={
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                },
+                usage={
+                    "input": self._last_usage.input_tokens,
+                    "output": self._last_usage.output_tokens,
+                },
             )
 
-        except APIConnectionError as error:
-            logger.exception("Anthropic API connection error during stream generation")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error=str(error),
+            return (
+                generated_text,
+                self._last_usage.input_tokens,
+                self._last_usage.output_tokens,
             )
-        except RateLimitError as error:
-            logger.exception("Anthropic API rate limit exceeded during stream generation")
-            raise ProviderRateLimitError(
-                provider=self.provider_type,
-                error=str(error),
-            )
-        except AuthenticationError as error:
-            logger.exception("Anthropic authentication error during stream generation")
-            raise ProviderConfigurationError(
-                provider=self.provider_type,
-                message="Invalid API credentials",
-                error=str(error),
-            )
-        except APIStatusError as error:
-            logger.exception("Anthropic API status error during stream generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=error.status_code,
-                message=error.message,
-                error=str(error),
-            )
-        except APIError as error:
-            logger.exception("Anthropic API error during stream generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=getattr(error, "status_code", 500),
-                error=str(error),
-            )
+
+        except (
+            APIConnectionError,
+            RateLimitError,
+            AuthenticationError,
+            APIStatusError,
+            APIError,
+        ) as error:
+            self._handle_api_error(error=error)
 
     @classmethod
     def get_default_models(cls) -> list[str]:
         """
-        Get list of default supported models
+        Get list of default supported models.
         """
         return ClaudeModelName.default_models()
 
     def get_token_usage(self) -> tuple[int, int]:
         """
-        Get the token usage from the last stream
+        Get the token usage from the last operation.
         """
         if self._last_usage:
-            return (self._last_usage.input_tokens, self._last_usage.output_tokens)
-        else:
-            return (0, 0)
+            return (
+                self._last_usage.input_tokens,
+                self._last_usage.output_tokens,
+            )
+        return (0, 0)

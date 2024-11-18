@@ -127,7 +127,7 @@ async def chat_complete(
     )
 
     # Get provider client
-    provider_client = service.get_provider_client(provider=provider, user_message_id=user_message.id)
+    provider_client = service.get_provider_client(provider=provider)
 
     if request.stream:
         return StreamingResponse(
