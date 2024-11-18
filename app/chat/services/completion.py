@@ -33,7 +33,14 @@ class ChatCompletionService:
         request: ChatRequest,
     ) -> tuple[ChatSession, LLMProvider, LLMModel]:
         """
-        Validate the chat completion request and return required models
+        Validate the chat completion request and return required models.
+        Args:
+            session_id: UUID of the chat session
+            request: Chat completion request
+        Returns:
+            Tuple of (ChatSession, LLMProvider, LLMModel)
+        Raises:
+            HTTPException: If session, provider or model not found
         """
         # Verify session exists and is active
         chat_session = await crud_session.get_active(db=self.db, id=session_id)
@@ -70,7 +77,7 @@ class ChatCompletionService:
         parent_id: UUID | None = None,
     ) -> ChatMessage:
         """
-        Create a new user message
+        Create a new user message with token counting and cost calculation.
         """
 
         # Get token counter for provider/model
@@ -97,26 +104,30 @@ class ChatCompletionService:
             ),
         )
 
-    def get_provider_client(self, provider: LLMProvider, user_message_id: UUID) -> AnthropicProvider:
+    def get_provider_client(self, provider: LLMProvider) -> AnthropicProvider:
         """
-        Get the appropriate provider client
+        Get the appropriate provider client.
+        Args:
+            provider: LLM provider configuration
+        Returns:
+            Provider-specific client instance
+        Raises:
+            HTTPException: If provider type is not supported
         """
-        if provider.name == ProviderType.ANTHROPIC:
-            return AnthropicProvider(provider=provider)
-
-        # Mark message as failed and raise exception
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported provider: {provider.name}",
-        )
+        if provider.name != ProviderType.ANTHROPIC:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported provider: {provider.name}",
+            )
+        return AnthropicProvider(provider=provider)
 
     async def get_conversation_history(
         self,
         chat_session: ChatSession,
-        current_message_id: UUID,
+        current_message_id: UUID | None = None,
     ) -> Sequence[ChatMessage]:
         """
-        Get recent conversation history for context
+        Get conversation history for context.
         """
         return await crud_message.get_session_context(
             db=self.db,
@@ -124,31 +135,62 @@ class ChatCompletionService:
             exclude_message_id=current_message_id,
         )
 
+    async def create_assistant_message(
+        self,
+        chat_session: ChatSession,
+        content: str,
+        parent_id: UUID,
+        model: LLMModel,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> ChatMessage:
+        """
+        Create an assistant message and update usage tracking.
+        """
+        assistant_message = await crud_message.create_with_session(
+            db=self.db,
+            session_id=chat_session.id,
+            obj_in=MessageCreate(
+                content=content,
+                role=MessageRole.ASSISTANT,
+                status=MessageStatus.COMPLETED,
+                parent_id=parent_id,
+            ),
+        )
+
+        await self.usage_tracker.update_message_usage(
+            message_id=assistant_message.id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
+        )
+
+        return assistant_message
+
     def update_langfuse_observation(
         self,
         chat_session: ChatSession,
         assistant_message: ChatMessage,
+        user_message: ChatMessage,
     ) -> None:
         """
-        Update the current observation in Langfuse context
+        Update Langfuse observation with message details.
         """
-        # Get usage details
-        usage = assistant_message.get_usage()
 
         # Update the observation with output details
         langfuse_context.update_current_observation(
-            output=assistant_message.content,
             session_id=str(chat_session.id),
-            usage={
-                "input": usage["input_tokens"],
-                "output": usage["output_tokens"],
-                "input_cost": usage["input_cost"],
-                "output_cost": usage["output_cost"],
-                "total_cost": usage["total_cost"],
+            status_message=assistant_message.status,
+            input=user_message.content,
+            output=assistant_message.content,
+            metadata={
+                "model_id": chat_session.llm_model_id,
+                "provider_id": chat_session.provider_id,
+                "message_id": assistant_message.id,
             },
         )
 
-    @observe(name="streaming", as_type="generation")
+    @observe(name="streaming")
     async def generate_stream(
         self,
         chat_session: ChatSession,
@@ -184,31 +226,23 @@ class ChatCompletionService:
             if is_final:  # Final message with usage info
                 # Get all tokens (input + output) from provider's response
                 input_tokens, output_tokens = provider_client.get_token_usage()
-
-                # Create and save the assistant message after successful generation
-                assistant_message = await crud_message.create_with_session(
-                    db=self.db,
-                    session_id=chat_session.id,
-                    obj_in=MessageCreate(
-                        content=full_content,
-                        role=MessageRole.ASSISTANT,
-                        status=MessageStatus.COMPLETED,
-                        parent_id=user_message.id,
-                    ),
-                )
-
-                # Update usage statistics with actual token counts
-                await self.usage_tracker.update_message_usage(
-                    message_id=assistant_message.id,
+                assistant_message = await self.create_assistant_message(
+                    chat_session=chat_session,
+                    content=full_content,
+                    parent_id=user_message.id,
+                    model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    model=model,
                 )
 
                 # Update Langfuse context with the assistant message
-                self.update_langfuse_observation(chat_session=chat_session, assistant_message=assistant_message)
+                self.update_langfuse_observation(
+                    chat_session=chat_session,
+                    assistant_message=assistant_message,
+                    user_message=user_message,
+                )
 
-    @observe(name="non_streaming", as_type="generation")
+    # @observe(name="non_streaming")
     async def generate_complete(
         self,
         chat_session: ChatSession,
@@ -236,28 +270,21 @@ class ChatCompletionService:
             temperature=request.temperature,
         )
 
-        # Create assistant message with completed content
-        assistant_message = await crud_message.create_with_session(
-            db=self.db,
-            session_id=chat_session.id,
-            obj_in=MessageCreate(
-                content=content,
-                role=MessageRole.ASSISTANT,
-                status=MessageStatus.COMPLETED,
-                parent_id=user_message.id,
-            ),
-        )
-
-        # Update usage statistics with actual token counts
-        await self.usage_tracker.update_message_usage(
-            message_id=assistant_message.id,
+        assistant_message = await self.create_assistant_message(
+            chat_session=chat_session,
+            content=content,
+            parent_id=user_message.id,
+            model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            model=model,
         )
 
         # Update Langfuse context with the assistant message
-        self.update_langfuse_observation(chat_session=chat_session, assistant_message=assistant_message)
+        self.update_langfuse_observation(
+            chat_session=chat_session,
+            assistant_message=assistant_message,
+            user_message=user_message,
+        )
 
         return ChatResponse(
             content=content,
