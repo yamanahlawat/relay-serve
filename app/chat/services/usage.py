@@ -25,16 +25,13 @@ class UsageTracker:
         """
         Update usage statistics for a message.
         Uses model's token costs for calculating total cost.
-
         Args:
             message_id: ID of the message to update
             input_tokens: Number of input tokens used
             output_tokens: Number of output tokens used
             model: LLM model used for the message
-
         Returns:
             Updated ChatMessage instance
-
         Raises:
             HTTPException: If message not found
         """
