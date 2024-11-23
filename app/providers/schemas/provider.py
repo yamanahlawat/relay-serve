@@ -23,7 +23,7 @@ class ProviderCreate(ProviderBase):
     Schema for creating a new provider.
     """
 
-    api_key: SecretStr = Field(min_length=1)
+    api_key: SecretStr | None = None
 
     model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
 
@@ -34,7 +34,7 @@ class ProviderRead(ProviderBase):
     """
 
     id: UUID
-    api_key: SecretStr
+    api_key: SecretStr | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -46,7 +46,10 @@ class ProviderUpdate(BaseModel):
     Schema for updating a provider.
     """
 
+    name: ProviderType | None = None
     is_active: bool | None = None
-    api_key: SecretStr | None = Field(None, min_length=1)
+    api_key: SecretStr | None = None
     base_url: str | None = None
     config: dict[str, Any] | None = None
+
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})

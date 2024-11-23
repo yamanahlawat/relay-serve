@@ -14,7 +14,7 @@ from app.providers.constants import ProviderType
 from app.providers.crud.model import crud_model
 from app.providers.crud.provider import crud_provider
 from app.providers.models import LLMModel, LLMProvider
-from app.providers.services.anthropic.client import AnthropicProvider
+from app.providers.services import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.services.utils import get_token_counter
 
 
@@ -84,7 +84,7 @@ class ChatCompletionService:
         token_counter = get_token_counter(provider=provider, model=model)
 
         # Count input tokens
-        input_tokens = await token_counter.count_tokens(content)
+        input_tokens = await token_counter.count_tokens(content) if token_counter else 0
 
         # Calculate cost
         input_cost = input_tokens * model.input_cost_per_token
@@ -104,7 +104,7 @@ class ChatCompletionService:
             ),
         )
 
-    def get_provider_client(self, provider: LLMProvider) -> AnthropicProvider:
+    def get_provider_client(self, provider: LLMProvider) -> AnthropicProvider | OllamaProvider | OpenAIProvider:
         """
         Get the appropriate provider client.
         Args:
@@ -114,12 +114,18 @@ class ChatCompletionService:
         Raises:
             HTTPException: If provider type is not supported
         """
-        if provider.name != ProviderType.ANTHROPIC:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported provider: {provider.name}",
-            )
-        return AnthropicProvider(provider=provider)
+        match provider.name:
+            case ProviderType.ANTHROPIC:
+                return AnthropicProvider(provider=provider)
+            case ProviderType.OLLAMA:
+                return OllamaProvider(provider=provider)
+            case ProviderType.OPENAI:
+                return OpenAIProvider(provider=provider)
+            case _:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported provider: {provider.name}",
+                )
 
     async def get_conversation_history(
         self,
@@ -195,7 +201,7 @@ class ChatCompletionService:
         self,
         chat_session: ChatSession,
         model: LLMModel,
-        provider_client: AnthropicProvider,
+        provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
         request: ChatRequest,
         user_message: ChatMessage,
     ) -> AsyncGenerator[str, None]:
@@ -209,7 +215,8 @@ class ChatCompletionService:
         )
 
         full_content = ""
-        input_tokens = output_tokens = 0
+        input_tokens = 0
+        output_tokens = 0
 
         async for chunk, is_final in provider_client.generate_stream(
             prompt=request.prompt,
@@ -242,12 +249,12 @@ class ChatCompletionService:
                     user_message=user_message,
                 )
 
-    # @observe(name="non_streaming")
+    @observe(name="non_streaming")
     async def generate_complete(
         self,
         chat_session: ChatSession,
         model: LLMModel,
-        provider_client: AnthropicProvider,
+        provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
         request: ChatRequest,
         user_message: ChatMessage,
     ) -> ChatResponse:
