@@ -23,7 +23,7 @@ class LLMProvider(TimeStampedBase):
 
     name: Mapped[ProviderType] = mapped_column(String(50), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    api_key: Mapped[str] = mapped_column(String(255))
+    api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     config: Mapped[dict] = mapped_column(type_=JSONB, default=dict)
 

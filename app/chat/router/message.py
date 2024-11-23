@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.crud import crud_message, crud_session
+from app.chat.models.message import ChatMessage
 from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate
 from app.database.dependencies import get_db_session
 
@@ -16,7 +17,7 @@ async def create_message(
     session_id: UUID,
     message_in: MessageCreate,
     db: AsyncSession = Depends(get_db_session),
-) -> MessageRead:
+) -> ChatMessage:
     """
     ## Create a New Chat Message
     Creates a new message in the specified chat session.
@@ -63,7 +64,7 @@ async def list_session_messages(
     offset: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db_session),
-) -> Sequence[MessageRead]:
+) -> Sequence[ChatMessage]:
     """
     ## List Session Messages
     Retrieves messages from a specific chat session.
@@ -95,7 +96,7 @@ async def get_message(
     session_id: UUID,
     message_id: UUID,
     db: AsyncSession = Depends(get_db_session),
-) -> MessageRead:
+) -> ChatMessage:
     """
     ## Get Message Details
     Retrieves details of a specific message.
@@ -134,7 +135,7 @@ async def update_message(
     message_id: UUID,
     message_in: MessageUpdate,
     db: AsyncSession = Depends(get_db_session),
-) -> MessageRead:
+) -> ChatMessage | None:
     """
     ## Update Message
     Updates the details of a specific message.

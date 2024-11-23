@@ -15,11 +15,15 @@ dependencies = [
     "loguru>=0.7.2",
     "sentry-sdk[fastapi,sqlalchemy]>=2.18.0",
     "langfuse>=2.53.9",
+    "ollama>=0.3.3",
+    "tenacity>=9.0.0",
+    "tiktoken>=0.8.0",
 ]
 
 [dependency-groups]
 providers = [
     "anthropic>=0.39.0",
+    "openai>=1.54.5",
 ]
 dev = [
     "ipdb>=0.13.13",

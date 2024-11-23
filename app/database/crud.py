@@ -115,7 +115,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         await db.commit()
         return db_obj
 
-    async def delete(self, db: AsyncSession, *, id: int) -> ModelType | None:
+    async def delete(self, db: AsyncSession, *, id: UUID) -> ModelType | None:
         """
         Delete a specific record by id.
         Args:
