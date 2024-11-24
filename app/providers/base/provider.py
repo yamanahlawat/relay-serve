@@ -13,7 +13,7 @@ class LLMProviderBase(ABC):
 
     def __init__(self, provider: LLMProvider) -> None:
         self.provider = provider
-        self.provider_type = ProviderType(provider.name)
+        self.provider_type = ProviderType(provider.type)
 
     @abstractmethod
     async def generate(
