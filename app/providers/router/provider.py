@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas.error import ErrorResponseModel
 from app.database.dependencies import get_db_session
 from app.providers.crud import crud_provider
-from app.providers.dependencies import check_existing_provider
+from app.providers.dependencies import validate_provider
 from app.providers.models import LLMProvider
 from app.providers.schemas import ProviderCreate, ProviderRead, ProviderUpdate
 
@@ -53,7 +53,7 @@ async def create_provider(
     if existing_provider:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Provider with name {provider_in.name} already exists",
+            detail=f"Provider with name {provider_in.name.value} already exists",
         )
 
     return await crud_provider.create(db=db, obj_in=provider_in)
@@ -104,7 +104,7 @@ async def list_providers(
     },
 )
 async def get_provider(
-    provider: ProviderRead = Depends(check_existing_provider),
+    provider: ProviderRead = Depends(validate_provider),
 ) -> ProviderRead:
     """
     ## Get a Specific LLM Provider
@@ -139,7 +139,7 @@ async def get_provider(
 )
 async def update_provider(
     provider_in: ProviderUpdate,
-    provider: ProviderRead = Depends(check_existing_provider),
+    provider: ProviderRead = Depends(validate_provider),
     db: AsyncSession = Depends(get_db_session),
 ) -> LLMProvider | None:
     """
@@ -187,7 +187,7 @@ async def update_provider(
     },
 )
 async def delete_provider(
-    provider: ProviderRead = Depends(check_existing_provider),
+    provider: ProviderRead = Depends(validate_provider),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """

@@ -1,6 +1,5 @@
 from typing import AsyncGenerator, Sequence
 
-from langfuse.decorators import langfuse_context, observe
 from loguru import logger
 from openai import (
     APIConnectionError,
@@ -16,13 +15,14 @@ from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.core.config import settings
 from app.providers.base import LLMProviderBase
-from app.providers.constants import OpenAIModelName
+from app.providers.constants import OpenAIModelName, ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
     ProviderConfigurationError,
     ProviderConnectionError,
     ProviderRateLimitError,
 )
+from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
 
@@ -122,7 +122,6 @@ class OpenAIProvider(LLMProviderBase):
             usage.completion_tokens,
         )
 
-    @observe(as_type="generation")
     async def generate_stream(
         self,
         prompt: str,
@@ -177,21 +176,6 @@ class OpenAIProvider(LLMProviderBase):
                     )
                     self._last_usage = self._get_usage_from_response(final_response)
 
-                    # Update Langfuse observation
-                    langfuse_context.update_current_observation(
-                        model=model,
-                        input=prompt,
-                        output=full_content,
-                        model_parameters={
-                            "max_tokens": max_tokens,
-                            "temperature": temperature,
-                        },
-                        usage={
-                            "prompt_tokens": self._last_usage[0],
-                            "completion_tokens": self._last_usage[1],
-                        },
-                    )
-
                     yield ("", True)
 
         except (
@@ -203,7 +187,6 @@ class OpenAIProvider(LLMProviderBase):
         ) as error:
             self._handle_api_error(error)
 
-    @observe(as_type="generation")
     async def generate(
         self,
         prompt: str,
@@ -242,21 +225,6 @@ class OpenAIProvider(LLMProviderBase):
             generated_text = response.choices[0].message.content or ""
             self._last_usage = self._get_usage_from_response(response)
 
-            # Update Langfuse observation
-            langfuse_context.update_current_observation(
-                model=model,
-                input=prompt,
-                output=generated_text,
-                model_parameters={
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                },
-                usage={
-                    "prompt_tokens": self._last_usage[0],
-                    "completion_tokens": self._last_usage[1],
-                },
-            )
-
             return (
                 generated_text,
                 self._last_usage[0],
@@ -285,3 +253,7 @@ class OpenAIProvider(LLMProviderBase):
         Returns tuple of (prompt_tokens, completion_tokens)
         """
         return self._last_usage if self._last_usage else (0, 0)
+
+
+# Register the OpenAI provider with the factory
+ProviderFactory.register(provider_type=ProviderType.OPENAI, provider_class=OpenAIProvider)

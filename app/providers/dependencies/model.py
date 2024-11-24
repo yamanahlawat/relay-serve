@@ -8,7 +8,7 @@ from app.providers.crud import crud_model
 from app.providers.models import LLMModel
 
 
-async def check_existing_model(llm_model_id: UUID, db: AsyncSession = Depends(get_db_session)) -> LLMModel:
+async def validate_model(llm_model_id: UUID, db: AsyncSession = Depends(get_db_session)) -> LLMModel:
     """
     Dependency to validate and retrieve an existing model.
     Args:

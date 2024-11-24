@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.crud import crud_session
-from app.chat.schemas.session import SessionCreate, SessionRead, SessionUpdate
+from app.chat.dependencies import validate_session
+from app.chat.models import ChatSession
+from app.chat.schemas import SessionCreate, SessionRead, SessionUpdate
 from app.database.dependencies import get_db_session
 from app.providers.crud import crud_model, crud_provider
 
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/sessions", tags=["Chat Sessions"])
 async def create_chat_session(
     session_in: SessionCreate,
     db: AsyncSession = Depends(get_db_session),
-) -> SessionRead:
+) -> ChatSession:
     """
     ## Create Chat Session
     Creates a new chat session with the specified provider and model.
@@ -60,7 +62,7 @@ async def list_chat_sessions(
     offset: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db_session),
-) -> Sequence[SessionRead]:
+) -> Sequence[ChatSession]:
     """
     ## List Chat Sessions
     Retrieves a list of all chat sessions.
@@ -80,9 +82,8 @@ async def list_chat_sessions(
 
 @router.get("/{session_id}/", response_model=SessionRead)
 async def get_chat_session(
-    session_id: UUID,
-    db: AsyncSession = Depends(get_db_session),
-) -> SessionRead:
+    session: ChatSession = Depends(dependency=validate_session),
+) -> ChatSession:
     """
     ## Get Chat Session
     Retrieves details of a specific chat session.
@@ -96,18 +97,15 @@ async def get_chat_session(
     ### Raises
     - **404**: Session not found
     """
-    session = await crud_session.get(db=db, id=session_id)
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
     return session
 
 
 @router.patch("/{session_id}/", response_model=SessionRead)
 async def update_chat_session(
-    session_id: UUID,
     session_in: SessionUpdate,
+    session: ChatSession = Depends(dependency=validate_session),
     db: AsyncSession = Depends(get_db_session),
-) -> SessionRead:
+) -> ChatSession:
     """
     ## Update Chat Session
     Updates the details of a specific chat session.
@@ -125,12 +123,7 @@ async def update_chat_session(
     - **404**: Session not found
     - **400**: Invalid request parameters
     """
-    session = await crud_session.get(db=db, id=session_id)
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
-
-    session = await crud_session.update(db=db, id=session_id, obj_in=session_in)
-    return session
+    return await crud_session.update(db=db, id=session.id, obj_in=session_in)
 
 
 @router.delete("/{session_id}/", status_code=status.HTTP_204_NO_CONTENT)

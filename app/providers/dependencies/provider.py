@@ -8,7 +8,7 @@ from app.providers.crud import crud_provider
 from app.providers.models import LLMProvider
 
 
-async def check_existing_provider(provider_id: UUID, db: AsyncSession = Depends(get_db_session)) -> LLMProvider:
+async def validate_provider(provider_id: UUID, db: AsyncSession = Depends(get_db_session)) -> LLMProvider:
     """
     Dependency to validate and retrieve an existing provider.
     Args:
