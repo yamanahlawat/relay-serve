@@ -12,7 +12,8 @@ class ProviderBase(BaseModel):
     Base schema for LLM providers.
     """
 
-    name: ProviderType
+    name: str
+    type: ProviderType
     is_active: bool = True
     base_url: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
@@ -46,7 +47,8 @@ class ProviderUpdate(BaseModel):
     Schema for updating a provider.
     """
 
-    name: ProviderType | None = None
+    name: str | None = None
+    type: ProviderType | None = None
     is_active: bool | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None

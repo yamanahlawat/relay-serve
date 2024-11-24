@@ -10,7 +10,6 @@ from anthropic import (
     RateLimitError,
 )
 from anthropic.types import MessageParam
-from langfuse.decorators import langfuse_context, observe
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -18,13 +17,14 @@ from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.core.config import settings
 from app.providers.base import LLMProviderBase
-from app.providers.constants import ClaudeModelName
+from app.providers.constants import ClaudeModelName, ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
     ProviderConfigurationError,
     ProviderConnectionError,
     ProviderRateLimitError,
 )
+from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
 
@@ -135,7 +135,6 @@ class AnthropicProvider(LLMProviderBase):
         message_params.append(MessageParam(role=MessageRole.USER.value, content=new_prompt))
         return message_params
 
-    @observe(as_type="generation")
     async def generate_stream(
         self,
         prompt: str,
@@ -174,21 +173,6 @@ class AnthropicProvider(LLMProviderBase):
                 final_message = await stream.get_final_message()
                 self._last_usage = final_message.usage
 
-                # Update Langfuse observation with usage details
-                langfuse_context.update_current_observation(
-                    model=model,
-                    input=prompt,
-                    output=final_message.content,
-                    model_parameters={
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                    },
-                    usage={
-                        "input": self._last_usage.input_tokens,
-                        "output": self._last_usage.output_tokens,
-                    },
-                )
-
                 # Signal completion with empty text and final flag
                 yield ("", True)
 
@@ -201,7 +185,6 @@ class AnthropicProvider(LLMProviderBase):
         ) as error:
             self._handle_api_error(error)
 
-    @observe
     async def generate(
         self,
         prompt: str,
@@ -227,21 +210,6 @@ class AnthropicProvider(LLMProviderBase):
 
         self._last_usage = response.usage
         generated_text = response.content[0].text if response.content else ""
-
-        # Update Langfuse observation with usage details
-        langfuse_context.update_current_observation(
-            model=model,
-            input=prompt,
-            output=generated_text,
-            model_parameters={
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            },
-            usage={
-                "input": self._last_usage.input_tokens,
-                "output": self._last_usage.output_tokens,
-            },
-        )
 
         return (
             generated_text,
@@ -305,3 +273,7 @@ class AnthropicProvider(LLMProviderBase):
                 self._last_usage.output_tokens,
             )
         return (0, 0)
+
+
+# Register the Anthropic provider with the factory
+ProviderFactory.register(provider_type=ProviderType.ANTHROPIC, provider_class=AnthropicProvider)

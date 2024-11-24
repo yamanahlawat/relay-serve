@@ -21,7 +21,8 @@ class LLMProvider(TimeStampedBase):
 
     id: Mapped[UUID] = mapped_column(default=uuid4, primary_key=True, index=True)
 
-    name: Mapped[ProviderType] = mapped_column(String(50), index=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    type: Mapped[ProviderType] = mapped_column(String(50), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)

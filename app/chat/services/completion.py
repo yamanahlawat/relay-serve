@@ -10,9 +10,10 @@ from app.chat.crud import crud_message, crud_session
 from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import ChatRequest, ChatResponse, MessageCreate
 from app.chat.services.usage import UsageTracker
-from app.providers.constants import ProviderType
+from app.providers.base.provider import LLMProviderBase
 from app.providers.crud.model import crud_model
 from app.providers.crud.provider import crud_provider
+from app.providers.factory import ProviderFactory
 from app.providers.models import LLMModel, LLMProvider
 from app.providers.services import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.services.utils import get_token_counter
@@ -104,7 +105,7 @@ class ChatCompletionService:
             ),
         )
 
-    def get_provider_client(self, provider: LLMProvider) -> AnthropicProvider | OllamaProvider | OpenAIProvider:
+    def get_provider_client(self, provider: LLMProvider) -> LLMProviderBase:
         """
         Get the appropriate provider client.
         Args:
@@ -114,18 +115,7 @@ class ChatCompletionService:
         Raises:
             HTTPException: If provider type is not supported
         """
-        match provider.name:
-            case ProviderType.ANTHROPIC:
-                return AnthropicProvider(provider=provider)
-            case ProviderType.OLLAMA:
-                return OllamaProvider(provider=provider)
-            case ProviderType.OPENAI:
-                return OpenAIProvider(provider=provider)
-            case _:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Unsupported provider: {provider.name}",
-                )
+        return ProviderFactory.get_client(provider=provider)
 
     async def get_conversation_history(
         self,
@@ -173,22 +163,26 @@ class ChatCompletionService:
 
         return assistant_message
 
-    def update_langfuse_observation(
+    def update_langfuse_trace(
         self,
         chat_session: ChatSession,
         assistant_message: ChatMessage,
         user_message: ChatMessage,
+        model: str,
+        usage: dict,
+        model_parameters: dict,
     ) -> None:
         """
-        Update Langfuse observation with message details.
+        Update langfuse trace with complete context.
         """
-
-        # Update the observation with output details
         langfuse_context.update_current_observation(
             session_id=str(chat_session.id),
             status_message=assistant_message.status,
             input=user_message.content,
             output=assistant_message.content,
+            model=model,
+            usage=usage,
+            model_parameters=model_parameters,
             metadata={
                 "model_id": chat_session.llm_model_id,
                 "provider_id": chat_session.provider_id,
@@ -208,15 +202,11 @@ class ChatCompletionService:
         """
         Generate streaming response
         """
-        # Get conversation history
         history = await self.get_conversation_history(
             chat_session=chat_session,
             current_message_id=user_message.id,
         )
-
         full_content = ""
-        input_tokens = 0
-        output_tokens = 0
 
         async for chunk, is_final in provider_client.generate_stream(
             prompt=request.prompt,
@@ -242,11 +232,20 @@ class ChatCompletionService:
                     output_tokens=output_tokens,
                 )
 
-                # Update Langfuse context with the assistant message
-                self.update_langfuse_observation(
+                # Update Langfuse with complete context
+                self.update_langfuse_trace(
                     chat_session=chat_session,
                     assistant_message=assistant_message,
                     user_message=user_message,
+                    model=model.name,
+                    usage={
+                        "input": input_tokens,
+                        "output": output_tokens,
+                    },
+                    model_parameters={
+                        "max_tokens": request.max_tokens,
+                        "temperature": request.temperature,
+                    },
                 )
 
     @observe(name="non_streaming")
@@ -287,10 +286,16 @@ class ChatCompletionService:
         )
 
         # Update Langfuse context with the assistant message
-        self.update_langfuse_observation(
+        self.update_langfuse_trace(
             chat_session=chat_session,
             assistant_message=assistant_message,
             user_message=user_message,
+            model=model.name,
+            usage={"input": input_tokens, "output": output_tokens},
+            model_parameters={
+                "max_tokens": request.max_tokens,
+                "temperature": request.temperature,
+            },
         )
 
         return ChatResponse(

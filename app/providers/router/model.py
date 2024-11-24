@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas.error import ErrorResponseModel
 from app.database.dependencies import get_db_session
 from app.providers.crud import crud_model, crud_provider
-from app.providers.dependencies import check_existing_model
+from app.providers.dependencies import validate_model
 from app.providers.models import LLMModel
 from app.providers.schemas import ModelCreate, ModelRead, ModelUpdate
 
@@ -133,7 +133,7 @@ async def list_models(
     },
 )
 async def get_model(
-    llm_model: LLMModel = Depends(check_existing_model),
+    llm_model: LLMModel = Depends(validate_model),
 ) -> LLMModel:
     """
     ## Get a Specific LLM Model
@@ -166,7 +166,7 @@ async def get_model(
 )
 async def update_model(
     model_in: ModelUpdate,
-    llm_model: LLMModel = Depends(check_existing_model),
+    llm_model: LLMModel = Depends(validate_model),
     db: AsyncSession = Depends(get_db_session),
 ) -> LLMModel | None:
     """
@@ -215,7 +215,7 @@ async def update_model(
     },
 )
 async def delete_model(
-    llm_model: LLMModel = Depends(check_existing_model),
+    llm_model: LLMModel = Depends(validate_model),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """

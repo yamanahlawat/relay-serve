@@ -1,8 +1,8 @@
-"""Added models for LLMProvider, LLMModel, ChatMessage, ChatSession
+"""Added database models for LLMProvider, LLMModel, ChatSession, ChatMessage and service clients
 
-Revision ID: 4c47b832eeff
+Revision ID: 445b888c586e
 Revises:
-Create Date: 2024-11-13 06:43:35.852428
+Create Date: 2024-11-24 11:54:51.038836
 
 """
 
@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "4c47b832eeff"
+revision: str = "445b888c586e"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -24,9 +24,10 @@ def upgrade() -> None:
     op.create_table(
         "llm_providers",
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("name", sa.String(length=50), nullable=False),
+        sa.Column("name", sa.String(length=100), nullable=False),
+        sa.Column("type", sa.String(length=50), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("api_key", sa.String(length=255), nullable=False),
+        sa.Column("api_key", sa.String(length=255), nullable=True),
         sa.Column("base_url", sa.String(length=255), nullable=True),
         sa.Column("config", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
@@ -36,6 +37,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_llm_providers_id"), "llm_providers", ["id"], unique=False)
     op.create_index(op.f("ix_llm_providers_name"), "llm_providers", ["name"], unique=False)
+    op.create_index(op.f("ix_llm_providers_type"), "llm_providers", ["type"], unique=False)
     op.create_table(
         "llm_models",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -131,6 +133,7 @@ def downgrade() -> None:
     op.drop_table("chat_sessions")
     op.drop_index(op.f("ix_llm_models_id"), table_name="llm_models")
     op.drop_table("llm_models")
+    op.drop_index(op.f("ix_llm_providers_type"), table_name="llm_providers")
     op.drop_index(op.f("ix_llm_providers_name"), table_name="llm_providers")
     op.drop_index(op.f("ix_llm_providers_id"), table_name="llm_providers")
     op.drop_table("llm_providers")

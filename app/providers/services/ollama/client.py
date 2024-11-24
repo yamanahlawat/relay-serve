@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import AsyncGenerator, Sequence
 
-from langfuse.decorators import langfuse_context, observe
 from loguru import logger
 from ollama import AsyncClient, Message, ResponseError
 
@@ -9,12 +8,14 @@ from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.core.config import settings
 from app.providers.base.provider import LLMProviderBase
+from app.providers.constants import ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
     ProviderConfigurationError,
     ProviderConnectionError,
     ProviderRateLimitError,
 )
+from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
 
@@ -119,7 +120,6 @@ class OllamaProvider(LLMProviderBase):
                 error=str(error),
             )
 
-    @observe(as_type="generation")
     async def generate_stream(
         self,
         prompt: str,
@@ -170,27 +170,11 @@ class OllamaProvider(LLMProviderBase):
                 metrics = self._get_usage_metrics(response=final_chunk)
                 self._last_usage = (metrics["prompt_tokens"], metrics["completion_tokens"])
 
-                # Update Langfuse observation
-                langfuse_context.update_current_observation(
-                    model=model,
-                    input=prompt,
-                    output=total_generated,
-                    model_parameters={
-                        "num_predict": max_tokens,
-                        "temperature": temperature,
-                    },
-                    usage={
-                        "prompt_tokens": metrics["prompt_tokens"],
-                        "completion_tokens": metrics["completion_tokens"],
-                    },
-                )
-
             yield ("", True)
 
         except Exception as error:
             await self._handle_api_error(error)
 
-    @observe(as_type="generation")
     async def generate(
         self,
         prompt: str,
@@ -231,21 +215,6 @@ class OllamaProvider(LLMProviderBase):
             # Store usage metrics
             self._last_usage = (metrics["prompt_tokens"], metrics["completion_tokens"])
 
-            # Update Langfuse observation
-            langfuse_context.update_current_observation(
-                model=model,
-                input=prompt,
-                output=generated_text,
-                model_parameters={
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                },
-                usage={
-                    "prompt_tokens": metrics["prompt_tokens"],
-                    "completion_tokens": metrics["completion_tokens"],
-                },
-            )
-
             return (
                 generated_text,
                 metrics["prompt_tokens"],
@@ -277,3 +246,7 @@ class OllamaProvider(LLMProviderBase):
         Get list of default supported models.
         """
         return cls._fetch_available_models()
+
+
+# Register the Ollama provider with the factory
+ProviderFactory.register(provider_type=ProviderType.OLLAMA, provider_class=OllamaProvider)
