@@ -60,7 +60,7 @@ class SSEConnectionManager:
         try:
             logger.info(f"Starting stream for session {session_id}")
             # Ensure the session is active
-            await self.connect(session_id)
+            await self.connect(session_id=session_id)
 
             # Publish messages to the channel as they are generated
             async for chunk in generator:
@@ -77,22 +77,6 @@ class SSEConnectionManager:
         finally:
             # Cleanup the session on disconnect
             background_tasks.add_task(self.disconnect, session_id)
-
-    async def subscribe_to_session(self, session_id: UUID) -> AsyncGenerator[str, None]:
-        """
-        Subscribe to the Redis Pub/Sub channel for a specific session.
-        """
-        pubsub_channel = f"sse:stream:{session_id}"
-        pubsub = self.redis.pubsub()
-        await pubsub.subscribe(pubsub_channel)
-
-        try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    yield f"data: {message['data']}\n\n"
-        finally:
-            await pubsub.unsubscribe(pubsub_channel)
-            await pubsub.close()
 
     async def cleanup(self) -> None:
         """

@@ -1,13 +1,27 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
+from app.chat.services.sse import get_sse_manager
 from app.core.config import settings
 from app.core.sentry import init_sentry
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # Get the SSE manager instance
+    manager = await get_sse_manager()
+    # Clean up Redis connections
+    await manager.cleanup()
+
 
 relay = FastAPI(
     title="Relay",
     description="Simple yet effective open source LLM Studio.",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware if allowed origins are set
