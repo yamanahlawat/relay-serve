@@ -1,41 +1,26 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.error import ErrorResponseModel
-from app.chat.schemas import ChatRequest, ChatResponse
+from app.chat.schemas import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.services.completion import ChatCompletionService
+from app.chat.services.sse import SSEConnectionManager, get_sse_manager
 from app.database.dependencies import get_db_session
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
-@router.post(
-    "/complete/{session_id}/",
-    response_model=ChatResponse,
+# For the streaming completion
+@router.get(
+    "/complete/{session_id}/{message_id}/stream",
+    response_class=StreamingResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {
-            "description": "Session, provider or model not found",
+            "description": "Session, message or model not found",
             "model": ErrorResponseModel,
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "Session not found": {"value": {"detail": "Chat session not found"}},
-                        "Provider not found": {"value": {"detail": "Provider not found"}},
-                    }
-                }
-            },
-        },
-        status.HTTP_400_BAD_REQUEST: {
-            "description": "Invalid request parameters",
-            "model": ErrorResponseModel,
-            "content": {
-                "application/json": {
-                    "examples": {"Invalid parameters": {"value": {"detail": "Invalid request parameters"}}}
-                }
-            },
         },
         status.HTTP_429_TOO_MANY_REQUESTS: {
             "description": "Rate limit exceeded",
@@ -60,16 +45,81 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
         status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "Provider service unavailable",
             "model": ErrorResponseModel,
+        },
+    },
+)
+async def stream_completion(
+    session_id: UUID,
+    message_id: UUID,
+    params: CompletionParams,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db_session),
+    sse_manager: SSEConnectionManager = Depends(get_sse_manager),
+) -> StreamingResponse:
+    """
+    ## Stream Chat Completion
+
+    Streams the completion for a previously created message using Server-Sent Events (SSE).
+
+    ### Parameters
+    - **session_id**: UUID of the chat session
+    - **message_id**: UUID of the message to generate completion for
+    - **params**: Generation parameters:
+        - **max_tokens**: Maximum tokens to generate (default: 1024)
+        - **temperature**: Temperature for generation (default: 0.7)
+
+    ### Returns
+    Server-sent events stream of the generated completion
+
+    ### Raises
+    - **404**: Session, message or model not found
+    - **429**: Rate limit exceeded
+    - **503**: Provider service unavailable
+    """
+    # Validate session, message, and model
+    service = ChatCompletionService(db=db)
+    chat_session, provider, model = await service.validate_message(session_id=session_id, message_id=message_id)
+
+    provider_client = service.get_provider_client(provider=provider)
+
+    return StreamingResponse(
+        sse_manager.stream_generator(
+            session_id=session_id,
+            generator=service.generate_stream(
+                chat_session=chat_session,
+                model=model,
+                provider_client=provider_client,
+                params=params,
+                message_id=message_id,
+            ),
+            background_tasks=background_tasks,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+# For the non streaming completion
+@router.post(
+    "/complete/{session_id}",
+    response_model=CompletionResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Session, provider or model not found",
+            "model": ErrorResponseModel,
+        },
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "description": "Rate limit exceeded",
+            "model": ErrorResponseModel,
             "content": {
                 "application/json": {
                     "examples": {
-                        "Connection error": {
+                        "Rate limit": {
                             "value": {
                                 "detail": {
-                                    "code": "connection_error",
-                                    "message": "Failed to connect to Anthropic API",
+                                    "code": "rate_limit_error",
+                                    "message": "Rate limit exceeded",
                                     "provider": "anthropic",
-                                    "details": "Connection error",
+                                    "details": "Too many requests",
                                 }
                             }
                         }
@@ -77,46 +127,48 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
                 }
             },
         },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "Provider service unavailable",
+            "model": ErrorResponseModel,
+        },
     },
 )
-async def chat_complete(
+async def complete(
     session_id: UUID,
-    request: ChatRequest,
+    request: CompletionRequest,
     db: AsyncSession = Depends(get_db_session),
-) -> ChatResponse | StreamingResponse:
+) -> CompletionResponse:
     """
-    ## Generate a Chat Completion for a Specific Session
+    ## Generate Chat Completion
 
-    Creates a new message in the chat session and generates a response using the specified LLM provider. Supports both streaming and non-streaming responses.
+    Generates a completion for the given prompt in a single request.
 
     ### Parameters
-
     - **session_id**: UUID of the chat session
-    - **request**: Chat completion request containing:
-    - **provider_id**: UUID of the LLM provider
+    - **request**: Completion request:
+    - **provider_id**: UUID of the LLM provider to use
     - **llm_model_id**: UUID of the model to use
-    - **prompt**: Input text prompt
-    - **stream**: Whether to stream the response (default: False)
+    - **prompt**: Text prompt to generate completion for
+    - **parent_id**: Optional parent message ID for threading
     - **max_tokens**: Maximum tokens to generate (default: 1024)
     - **temperature**: Temperature for generation (default: 0.7)
-    - **parent_id**: Optional ID of the parent message for threading
 
     ### Returns
-
-    - If `stream=False`: Generated text response with usage metrics
-    - If `stream=True`: Server-sent events stream of generated text chunks
+    The generated completion with usage statistics
 
     ### Raises
-
     - **404**: Session, provider or model not found
-    - **400**: Invalid request parameters or provider
     - **429**: Rate limit exceeded
     - **503**: Provider service unavailable
-    - **500**: Unexpected server error
     """
     service = ChatCompletionService(db=db)
+
     # Validate request and get required models
-    chat_session, provider, model = await service.validate_request(session_id=session_id, request=request)
+    chat_session, provider, model = await service.validate_request(
+        session_id=session_id,
+        request=request,
+    )
+
     # Create user message
     user_message = await service.create_user_message(
         session_id=session_id,
@@ -129,22 +181,11 @@ async def chat_complete(
     # Get provider client
     provider_client = service.get_provider_client(provider=provider)
 
-    if request.stream:
-        return StreamingResponse(
-            service.generate_stream(
-                chat_session=chat_session,
-                model=model,
-                provider_client=provider_client,
-                request=request,
-                user_message=user_message,
-            ),
-            media_type="text/event-stream",
-        )
-    else:
-        return await service.generate_complete(
-            chat_session=chat_session,
-            model=model,
-            provider_client=provider_client,
-            request=request,
-            user_message=user_message,
-        )
+    # Generate completion
+    return await service.generate_complete(
+        chat_session=chat_session,
+        model=model,
+        provider_client=provider_client,
+        request=request,
+        user_message=user_message,
+    )

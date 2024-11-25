@@ -1,4 +1,4 @@
-from app.chat.schemas.chat import ChatRequest, ChatResponse
+from app.chat.schemas.chat import CompletionRequest, CompletionResponse, CompletionParams
 from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate
 from app.chat.schemas.session import SessionCreate, SessionRead, SessionUpdate
@@ -15,6 +15,7 @@ __all__ = [
     "SessionRead",
     "SessionUpdate",
     # Chat schemas
-    "ChatRequest",
-    "ChatResponse",
+    "CompletionRequest",
+    "CompletionResponse",
+    "CompletionParams",
 ]
