@@ -67,7 +67,7 @@ async def list_session_messages(
     ### Parameters
     - **session_id**: UUID of the chat session
     - **offset**: Number of messages to skip (default: 0)
-    - **limit**: Maximum number of messages to return (default: 50)
+    - **limit**: Maximum number of messages to return (default: 10)
 
     ### Returns
     List of messages in chronological order

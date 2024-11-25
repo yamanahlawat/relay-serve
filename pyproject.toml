@@ -17,6 +17,7 @@ dependencies = [
     "langfuse>=2.53.9",
     "tenacity>=9.0.0",
     "tiktoken>=0.8.0",
+    "redis[hiredis]>=5.2.0",
 ]
 
 [dependency-groups]

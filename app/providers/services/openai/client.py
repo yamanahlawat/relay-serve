@@ -161,12 +161,12 @@ class OpenAIProvider(LLMProviderBase):
             # Track full content for Langfuse
             full_content = ""
             async for chunk in stream:
-                if content := chunk.choices[0].delta.content:
+                if chunk.choices and (content := chunk.choices[0].delta.content):
                     full_content += content
                     yield (content, False)
 
                 # On last chunk, get usage metrics
-                if chunk.choices[0].finish_reason:
+                if chunk.choices and chunk.choices[0].finish_reason:
                     # Make a non-streaming call to get usage metrics
                     final_response = await self._client.chat.completions.create(
                         model=model,

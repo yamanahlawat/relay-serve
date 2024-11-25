@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat.constants import MessageRole, MessageStatus
 from app.chat.crud import crud_message, crud_session
 from app.chat.models import ChatMessage, ChatSession
-from app.chat.schemas import ChatRequest, ChatResponse, MessageCreate
-from app.chat.services.usage import UsageTracker
+from app.chat.schemas import MessageCreate
+from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
+from app.chat.schemas.message import MessageUsage
 from app.providers.base.provider import LLMProviderBase
 from app.providers.crud.model import crud_model
 from app.providers.crud.provider import crud_provider
@@ -26,12 +27,11 @@ class ChatCompletionService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.usage_tracker = UsageTracker(db=db)
 
     async def validate_request(
         self,
         session_id: UUID,
-        request: ChatRequest,
+        request: CompletionRequest,
     ) -> tuple[ChatSession, LLMProvider, LLMModel]:
         """
         Validate the chat completion request and return required models.
@@ -69,6 +69,59 @@ class ChatCompletionService:
 
         return chat_session, provider, model
 
+    async def validate_message(
+        self,
+        session_id: UUID,
+        message_id: UUID,
+    ) -> tuple[ChatSession, LLMProvider, LLMModel]:
+        """
+        Validate the message and return required models.
+        Args:
+            session_id: UUID of the chat session
+            message_id: UUID of the message
+        Returns:
+            Tuple of (ChatSession, LLMProvider, LLMModel)
+        Raises:
+            HTTPException: If session, message not found
+        """
+        # Verify session exists and is active
+        chat_session = await crud_session.get_active(db=self.db, id=session_id)
+        if not chat_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Active chat session {session_id} not found",
+            )
+
+        # Get message and verify it belongs to session
+        message = await crud_message.get(db=self.db, id=message_id)
+        if not message:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message {message_id} not found",
+            )
+        if message.session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Message belongs to different session",
+            )
+
+        # Get provider and model from session
+        provider = await crud_provider.get(db=self.db, id=chat_session.provider_id)
+        if not provider:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Provider {chat_session.provider_id} not found",
+            )
+
+        model = await crud_model.get(db=self.db, id=chat_session.llm_model_id)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Model {chat_session.llm_model_id} not found",
+            )
+
+        return chat_session, provider, model
+
     async def create_user_message(
         self,
         session_id: UUID,
@@ -98,10 +151,12 @@ class ChatCompletionService:
                 role=MessageRole.USER,
                 status=MessageStatus.COMPLETED,
                 parent_id=parent_id,
-                input_tokens=input_tokens,
-                output_tokens=0,
-                input_cost=input_cost,
-                output_cost=0,
+                usage=MessageUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                    input_cost=input_cost,
+                    output_cost=0,
+                ),
             ),
         )
 
@@ -143,6 +198,11 @@ class ChatCompletionService:
         """
         Create an assistant message and update usage tracking.
         """
+        # Calculate costs using model's rates
+        input_cost = input_tokens * model.input_cost_per_token
+        output_cost = output_tokens * model.output_cost_per_token
+
+        # Create message with usage metrics
         assistant_message = await crud_message.create_with_session(
             db=self.db,
             session_id=chat_session.id,
@@ -151,16 +211,14 @@ class ChatCompletionService:
                 role=MessageRole.ASSISTANT,
                 status=MessageStatus.COMPLETED,
                 parent_id=parent_id,
+                usage=MessageUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    input_cost=input_cost,
+                    output_cost=output_cost,
+                ),
             ),
         )
-
-        await self.usage_tracker.update_message_usage(
-            message_id=assistant_message.id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            model=model,
-        )
-
         return assistant_message
 
     def update_langfuse_trace(
@@ -196,55 +254,59 @@ class ChatCompletionService:
         chat_session: ChatSession,
         model: LLMModel,
         provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
-        request: ChatRequest,
-        user_message: ChatMessage,
+        params: CompletionParams,
+        message_id: UUID,
     ) -> AsyncGenerator[str, None]:
-        """
-        Generate streaming response
-        """
+        """Generate streaming response"""
+        # Get the message
+        message = await crud_message.get(db=self.db, id=message_id)
+        if not message:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Message {message_id} not found",
+            )
+
         history = await self.get_conversation_history(
             chat_session=chat_session,
-            current_message_id=user_message.id,
+            current_message_id=message_id,
         )
         full_content = ""
 
         async for chunk, is_final in provider_client.generate_stream(
-            prompt=request.prompt,
+            prompt=message.content,
             model=model.name,
             system_context=chat_session.system_context,
             messages=history,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
+            max_tokens=params.max_tokens,
+            temperature=params.temperature,
         ):
-            if chunk:  # If there's content
+            if chunk:
                 full_content += chunk
                 yield chunk
 
-            if is_final:  # Final message with usage info
-                # Get all tokens (input + output) from provider's response
+            if is_final:
                 input_tokens, output_tokens = provider_client.get_token_usage()
                 assistant_message = await self.create_assistant_message(
                     chat_session=chat_session,
                     content=full_content,
-                    parent_id=user_message.id,
+                    parent_id=message_id,
                     model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                 )
 
-                # Update Langfuse with complete context
                 self.update_langfuse_trace(
                     chat_session=chat_session,
                     assistant_message=assistant_message,
-                    user_message=user_message,
+                    user_message=message,
                     model=model.name,
                     usage={
                         "input": input_tokens,
                         "output": output_tokens,
                     },
                     model_parameters={
-                        "max_tokens": request.max_tokens,
-                        "temperature": request.temperature,
+                        "max_tokens": params.max_tokens,
+                        "temperature": params.temperature,
                     },
                 )
 
@@ -254,9 +316,9 @@ class ChatCompletionService:
         chat_session: ChatSession,
         model: LLMModel,
         provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
-        request: ChatRequest,
+        request: CompletionRequest,
         user_message: ChatMessage,
-    ) -> ChatResponse:
+    ) -> CompletionResponse:
         """
         Generate complete response
         """
@@ -298,7 +360,7 @@ class ChatCompletionService:
             },
         )
 
-        return ChatResponse(
+        return CompletionResponse(
             content=content,
             model=model.name,
             provider=provider_client.provider.name,
