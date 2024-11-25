@@ -33,7 +33,15 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
             Created ChatMessage
         """
         message_data = obj_in.model_dump()
-        db_obj = ChatMessage(**message_data, session_id=session_id)
+        usage = message_data.pop("usage")
+        db_obj = ChatMessage(
+            **message_data,
+            session_id=session_id,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            input_cost=usage["input_cost"],
+            output_cost=usage["output_cost"],
+        )
         db.add(db_obj)
         await db.commit()
         await db.refresh(db_obj)
