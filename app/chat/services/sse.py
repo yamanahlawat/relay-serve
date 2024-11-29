@@ -23,7 +23,7 @@ class SSEConnectionManager:
         Factory method to create connection manager with Redis.
         """
         redis = Redis.from_url(
-            url=str(settings.REDIS_URL),
+            url=str(settings.REDIS.DSN),
             encoding="utf-8",
             decode_responses=True,
             socket_keepalive=True,

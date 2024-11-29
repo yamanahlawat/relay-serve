@@ -25,15 +25,15 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-relay_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_super_secret_password}
-      POSTGRES_DB: ${POSTGRES_DB:-relay_db}
+      POSTGRES_USER: ${DATABASE__USER:-relay_user}
+      POSTGRES_PASSWORD: ${DATABASE__PASSWORD:-relay_super_secret_password}
+      POSTGRES_DB: ${DATABASE__DB:-relay_db}
     ports:
-      - ${RELAY_DB_PORT:-5420}:5432
+      - ${DATABASE__PORT:-5420}:5432
     volumes:
       - relay_db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-relay_user}"]
+      test: ["CMD", "pg_isready", "-U", "${DATABASE__USER:-relay_user}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -74,13 +74,13 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@langfuse_db:5432/${LANGFUSE_DB}
-      - NEXTAUTH_SECRET=${LANGFUSE_AUTH_SECRET}
-      - SALT=${LANGFUSE_SALT}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
-      - NEXTAUTH_URL=http://localhost:3000
-      - TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-true}
-      - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+      DATABASE_URL: postgresql://${DATABASE__USER}:${DATABASE__PASSWORD}@langfuse_db:5432/${LANGFUSE_DB}
+      NEXTAUTH_SECRET: ${LANGFUSE_AUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      NEXTAUTH_URL: http://localhost:3000
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
     depends_on:
       langfuse_db:
         condition: service_healthy
@@ -92,15 +92,15 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${DATABASE__USER}
+      POSTGRES_PASSWORD: ${DATABASE__PASSWORD}
       POSTGRES_DB: ${LANGFUSE_DB}
     ports:
       - ${LANGFUSE_DB_PORT:-5421}:5432
     volumes:
       - langfuse_db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      test: ["CMD", "pg_isready", "-U", "${DATABASE__USER}"]
       interval: 10s
       timeout: 5s
       retries: 5

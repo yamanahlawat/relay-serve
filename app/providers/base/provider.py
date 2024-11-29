@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 
-from app.core.config import settings
+from app.chat.constants import llm_defaults
 from app.providers.constants import ProviderType
 from app.providers.models import LLMProvider
 
@@ -20,8 +20,8 @@ class LLMProviderBase(ABC):
         self,
         prompt: str,
         model: str,
-        max_tokens: int = settings.DEFAULT_MAX_TOKENS,
-        temperature: float = settings.DEFAULT_TEMPERATURE,
+        max_tokens: int = llm_defaults.MAX_TOKENS,
+        temperature: float = llm_defaults.TEMPERATURE,
     ) -> str:
         """
         Generate text using the provider.
@@ -29,11 +29,11 @@ class LLMProviderBase(ABC):
             prompt: The input prompt text.
             model: The name of the model to use for generation.
             max_tokens: Maximum number of tokens to generate.
-                Defaults to settings.DEFAULT_MAX_TOKENS.
+                Defaults to llm_defaults.MAX_TOKENS.
             temperature: Temperature parameter for generation.
                 Higher values make output more random and creative; lower values
                 make output more focused and deterministic.
-                Defaults to settings.DEFAULT_TEMPERATURE.
+                Defaults to llm_defaults.TEMPERATURE.
         Returns:
             str: The generated text.
         """
@@ -44,8 +44,8 @@ class LLMProviderBase(ABC):
         self,
         prompt: str,
         model: str,
-        max_tokens: int = settings.DEFAULT_MAX_TOKENS,
-        temperature: float = settings.DEFAULT_TEMPERATURE,
+        max_tokens: int = llm_defaults.MAX_TOKENS,
+        temperature: float = llm_defaults.TEMPERATURE,
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using the provider in a streaming manner.
@@ -53,11 +53,11 @@ class LLMProviderBase(ABC):
             prompt: The input prompt text.
             model: The name of the model to use for generation.
             max_tokens: Maximum number of tokens to generate.
-                Defaults to settings.DEFAULT_MAX_TOKENS.
+                Defaults to llm_defaults.MAX_TOKENS.
             temperature: Temperature parameter for generation.
                 Higher values make output more random and creative; lower values
                 make output more focused and deterministic.
-                Defaults to settings.DEFAULT_TEMPERATURE.
+                Defaults to llm_defaults.TEMPERATURE.
         Yields:
             str: The generated text chunks in a stream.
         """

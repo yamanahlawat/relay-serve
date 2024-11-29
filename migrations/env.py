@@ -43,7 +43,7 @@ def run_migrations_offline() -> None:
 
     """
     context.configure(
-        url=str(settings.POSTGRES_DSN),
+        url=str(settings.DATABASE.DSN),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -66,7 +66,7 @@ async def run_async_migrations() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = str(settings.POSTGRES_DSN)
+    configuration["sqlalchemy.url"] = str(settings.DATABASE.DSN)
 
     connectable = async_engine_from_config(
         configuration,

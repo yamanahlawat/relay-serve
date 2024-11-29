@@ -51,8 +51,8 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 async def stream_completion(
     session_id: UUID,
     message_id: UUID,
-    params: CompletionParams,
     background_tasks: BackgroundTasks,
+    params: CompletionParams = Depends(),
     db: AsyncSession = Depends(get_db_session),
     sse_manager: SSEConnectionManager = Depends(get_sse_manager),
 ) -> StreamingResponse:
@@ -65,8 +65,8 @@ async def stream_completion(
     - **session_id**: UUID of the chat session
     - **message_id**: UUID of the message to generate completion for
     - **params**: Generation parameters:
-        - **max_tokens**: Maximum tokens to generate (default: 1024)
-        - **temperature**: Temperature for generation (default: 0.7)
+    - **max_tokens**: Maximum tokens to generate (default: 1024)
+    - **temperature**: Temperature for generation (default: 0.7)
 
     ### Returns
     Server-sent events stream of the generated completion

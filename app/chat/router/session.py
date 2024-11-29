@@ -1,5 +1,4 @@
 from typing import Sequence
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +127,7 @@ async def update_chat_session(
 
 @router.delete("/{session_id}/", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
-    session_id: UUID,
+    session: ChatSession = Depends(dependency=validate_session),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """
@@ -141,8 +140,4 @@ async def delete_chat_session(
     ### Raises
     - **404**: Session not found
     """
-    session = await crud_session.get(db=db, id=session_id)
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chat session {session_id} not found")
-
-    await crud_session.delete(db=db, id=session_id)
+    await crud_session.delete(db=db, id=session.id)
