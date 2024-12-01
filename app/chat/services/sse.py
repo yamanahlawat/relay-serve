@@ -23,7 +23,7 @@ class SSEConnectionManager:
         Factory method to create connection manager with Redis.
         """
         redis = Redis.from_url(
-            url=str(settings.REDIS_URL),
+            url=str(settings.REDIS.DSN),
             encoding="utf-8",
             decode_responses=True,
             socket_keepalive=True,
@@ -66,12 +66,11 @@ class SSEConnectionManager:
             async for chunk in generator:
                 if not await self.redis.exists(session_key):
                     break
-                logger.debug(f"Published chunk to {pubsub_channel}: {chunk}")
                 await self.redis.publish(pubsub_channel, chunk)
                 yield chunk
 
-        except Exception as e:
-            response = StreamResponse(event=StreamEvent.ERROR, error=str(e))
+        except Exception as error:
+            response = StreamResponse(event=StreamEvent.ERROR, error=str(error))
             yield f"data: {response.model_dump_json()}\n\n"
 
         finally:

@@ -1,8 +1,8 @@
-from app.providers.base.token_counter import TokenCounterBase
+from app.providers.clients.anthropic.token_counter import AnthropicTokenCounter
+from app.providers.clients.base import TokenCounterBase
+from app.providers.clients.openai.token_counter import OpenAITokenCounter
 from app.providers.constants import ProviderType
 from app.providers.models import LLMModel, LLMProvider
-from app.providers.services.anthropic.token_counter import AnthropicTokenCounter
-from app.providers.services.openai.token_counter import OpenAITokenCounter
 
 
 def get_token_counter(provider: LLMProvider, model: LLMModel) -> TokenCounterBase | None:

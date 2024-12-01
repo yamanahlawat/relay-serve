@@ -4,7 +4,7 @@ from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.config import settings
+from app.chat.constants import llm_defaults
 from app.database.base_class import TimeStampedBase
 from app.providers.models.provider import LLMProvider
 
@@ -24,8 +24,8 @@ class LLMModel(TimeStampedBase):
 
     # Model configuration
     max_tokens: Mapped[int | None] = mapped_column(default=None)
-    temperature: Mapped[float] = mapped_column(default=settings.DEFAULT_TEMPERATURE)
-    top_p: Mapped[float] = mapped_column(default=settings.DEFAULT_TOP_P)
+    temperature: Mapped[float] = mapped_column(default=llm_defaults.TEMPERATURE)
+    top_p: Mapped[float] = mapped_column(default=llm_defaults.TOP_P)
     config: Mapped[dict] = mapped_column(type_=JSONB, default=dict)
 
     # Cost tracking (in USD)

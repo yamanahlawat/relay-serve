@@ -13,10 +13,9 @@ from anthropic.types import MessageParam
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.chat.constants import MessageRole
+from app.chat.constants import MessageRole, llm_defaults
 from app.chat.models import ChatMessage
-from app.core.config import settings
-from app.providers.base import LLMProviderBase
+from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ClaudeModelName, ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
@@ -141,8 +140,8 @@ class AnthropicProvider(LLMProviderBase):
         model: str,
         system_context: str = "",
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = settings.DEFAULT_MAX_TOKENS,
-        temperature: float = settings.DEFAULT_TEMPERATURE,
+        max_tokens: int = llm_defaults.MAX_TOKENS,
+        temperature: float = llm_defaults.TEMPERATURE,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Anthropic Claude.
@@ -191,8 +190,8 @@ class AnthropicProvider(LLMProviderBase):
         model: str,
         system_context: str = "",
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = settings.DEFAULT_MAX_TOKENS,
-        temperature: float = settings.DEFAULT_TEMPERATURE,
+        max_tokens: int = llm_defaults.MAX_TOKENS,
+        temperature: float = llm_defaults.TEMPERATURE,
     ) -> tuple[str, int, int]:
         """
         Generate text using Anthropic Claude with improved error handling and retries.

@@ -14,7 +14,7 @@ class SessionCreate(BaseModel):
     """
 
     title: str = Field(min_length=1, max_length=255)
-    system_context: str | None = Field(default=None, max_length=4000)
+    system_context: str | None = Field(default=None)
     provider_id: UUID
     llm_model_id: UUID
     extra_data: dict[str, Any] = Field(default_factory=dict)

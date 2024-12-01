@@ -1,9 +1,64 @@
 from functools import lru_cache
 
-from pydantic import HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
+from pydantic import Field, HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.constants import Environment
+
+
+class DatabaseSettings(BaseSettings):
+    HOST: str
+    USER: str
+    PASSWORD: SecretStr
+    DB: str
+    PORT: int = 5432
+    DSN: PostgresDsn | None = None
+
+    @field_validator("DSN", mode="after")
+    def assemble_db_connection(cls, value: PostgresDsn | None, info: ValidationInfo) -> PostgresDsn:
+        """
+        Assembles the database connection URL from the individual components.
+        """
+        if isinstance(value, str):
+            return value
+        values = info.data
+        return PostgresDsn.build(
+            scheme="postgresql+asyncpg",
+            username=values.get("USER"),
+            password=values.get("PASSWORD").get_secret_value(),
+            host=values.get("HOST"),
+            port=values.get("PORT"),
+            path=values.get("DB"),
+        )
+
+
+class RedisSettings(BaseSettings):
+    HOST: str
+    PORT: int
+    DB: int
+    DSN: RedisDsn | None = None
+
+    @field_validator("DSN", mode="after")
+    def assemble_redis_connection(cls, value: RedisDsn | None, info: ValidationInfo) -> RedisDsn:
+        """
+        Assembles the Redis connection URL from the individual components.
+        """
+        if isinstance(value, str):
+            return value
+        values = info.data
+        return RedisDsn.build(
+            scheme="redis",
+            host=values.get("HOST", ""),
+            port=values.get("PORT"),
+            path=f"/{values.get('DB')}",
+        )
+
+
+class LLMSettings(BaseSettings):
+    # Default LLM Params
+    TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
+    TOP_P: float = Field(default=0.9, ge=0.0, le=1.0)
+    MAX_TOKENS: int = 1024
 
 
 class Settings(BaseSettings):
@@ -33,57 +88,18 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str | None = None
 
     # Database Settings
-    POSTGRES_HOST: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: SecretStr
-    POSTGRES_DB: str
-    POSTGRES_PORT: int = 5432
-    POSTGRES_DSN: PostgresDsn | None = None
+    DATABASE: DatabaseSettings
 
     # Redis
-    REDIS_HOST: str
-    REDIS_PORT: int
-    REDIS_DB: int
-    REDIS_URL: RedisDsn | None = None
+    REDIS: RedisSettings
 
-    # Default LLM Params
-    DEFAULT_TEMPERATURE: float = 0.7
-    DEFAULT_TOP_P: float = 0.9
-    DEFAULT_MAX_TOKENS: int = 1024
-
-    @field_validator("POSTGRES_DSN", mode="after")
-    def assemble_db_connection(cls, value: PostgresDsn | None, info: ValidationInfo) -> PostgresDsn:
-        """
-        Assembles the database connection URL from the individual components.
-        """
-        if isinstance(value, str):
-            return value
-        values = info.data
-        return PostgresDsn.build(
-            scheme="postgresql+asyncpg",
-            username=values.get("POSTGRES_USER"),
-            password=values.get("POSTGRES_PASSWORD").get_secret_value(),
-            host=values.get("POSTGRES_HOST"),
-            port=values.get("POSTGRES_PORT"),
-            path=values.get("POSTGRES_DB"),
-        )
-
-    @field_validator("REDIS_URL", mode="after")
-    def assemble_redis_connection(cls, value: RedisDsn | None, info: ValidationInfo) -> RedisDsn:
-        """
-        Assembles the Redis connection URL from the individual components.
-        """
-        if isinstance(value, str):
-            return value
-        values = info.data
-        return RedisDsn.build(
-            scheme="redis",
-            host=values.get("REDIS_HOST", ""),
-            port=values.get("REDIS_PORT"),
-            path=f"/{values.get('REDIS_DB')}",
-        )
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="allow")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        case_sensitive=True,
+        extra="allow",
+    )
 
 
 @lru_cache
