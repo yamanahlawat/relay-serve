@@ -11,6 +11,9 @@ from app.core.sentry import init_sentry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Context manager to handle the lifespan of the application.
+    """
     yield
     # Get the SSE manager instance
     manager = await get_sse_manager()

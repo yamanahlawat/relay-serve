@@ -1,15 +1,13 @@
 from typing import Sequence
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, status
 
 from app.api.schemas.error import ErrorResponseModel
-from app.database.dependencies import get_db_session
-from app.providers.crud import crud_model, crud_provider
-from app.providers.dependencies import validate_model
+from app.providers.dependencies.model import get_model_service
 from app.providers.models import LLMModel
 from app.providers.schemas import ModelCreate, ModelRead, ModelUpdate
+from app.providers.services.model import LLMModelService
 
 router = APIRouter(prefix="/models", tags=["Models"])
 
@@ -43,7 +41,7 @@ router = APIRouter(prefix="/models", tags=["Models"])
 )
 async def create_model(
     model_in: ModelCreate,
-    db: AsyncSession = Depends(get_db_session),
+    service: LLMModelService = Depends(get_model_service),
 ) -> LLMModel:
     """
     ## Create a New LLM Model Configuration
@@ -57,27 +55,7 @@ async def create_model(
     - **config**: Model-specific configuration parameters
     - **is_active**: Whether the model is active (default: True)
     """
-    # Verify provider exists
-    provider = await crud_provider.get(db=db, id=model_in.provider_id)
-    if not provider:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Provider with id {model_in.provider_id} not found",
-        )
-
-    # Check if model with same name exists for this provider
-    filters = [crud_model.model.provider_id == model_in.provider_id, crud_model.model.name == model_in.name]
-    existing_model = await crud_model.filter(
-        db=db,
-        filters=filters,
-    )
-    if existing_model:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Model {model_in.name} already exists for this provider",
-        )
-
-    return await crud_model.create(db=db, obj_in=model_in)
+    return await service.create_model(model_in=model_in)
 
 
 @router.get(
@@ -86,7 +64,7 @@ async def create_model(
     responses={status.HTTP_200_OK: {"description": "Successfully retrieved list of models", "model": list[ModelRead]}},
 )
 async def list_models(
-    db: AsyncSession = Depends(get_db_session),
+    service: LLMModelService = Depends(get_model_service),
     provider_id: UUID | None = None,
     offset: int = 0,
     limit: int = 10,
@@ -104,17 +82,7 @@ async def list_models(
     ### Returns
     List of model configurations with their details
     """
-    if provider_id:
-        filters = [crud_model.model.provider_id == provider_id]
-        models = await crud_model.filter(
-            db=db,
-            filters=filters,
-            offset=offset,
-            limit=limit,
-        )
-    else:
-        models = await crud_model.filter(db=db, offset=offset, limit=limit)
-    return models
+    return await service.list_models(provider_id=provider_id, offset=offset, limit=limit)
 
 
 @router.get(
@@ -133,7 +101,8 @@ async def list_models(
     },
 )
 async def get_model(
-    llm_model: LLMModel = Depends(validate_model),
+    llm_model_id: UUID,
+    service: LLMModelService = Depends(get_model_service),
 ) -> LLMModel:
     """
     ## Get a Specific LLM Model
@@ -146,7 +115,7 @@ async def get_model(
     ### Returns
     Detailed model configuration information
     """
-    return llm_model
+    return await service.get_model(llm_model_id=llm_model_id)
 
 
 @router.patch(
@@ -166,8 +135,8 @@ async def get_model(
 )
 async def update_model(
     model_in: ModelUpdate,
-    llm_model: LLMModel = Depends(validate_model),
-    db: AsyncSession = Depends(get_db_session),
+    llm_model_id: UUID,
+    service: LLMModelService = Depends(get_model_service),
 ) -> LLMModel | None:
     """
     ## Update a Specific LLM Model Configuration
@@ -184,19 +153,7 @@ async def update_model(
     ### Returns
     Updated model configuration
     """
-    if model_in.name and model_in.name != llm_model.name:
-        # Check if model with new name already exists for this provider
-        filters = [
-            crud_model.model.provider_id == llm_model.provider_id,
-            crud_model.model.name == model_in.name,
-        ]
-        existing_model = await crud_model.filter(db=db, filters=filters)
-        if existing_model:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Model {model_in.name} already exists for this provider",
-            )
-    return await crud_model.update(db=db, id=llm_model.id, obj_in=model_in)
+    return await service.update_model(llm_model_id=llm_model_id, model_in=model_in)
 
 
 @router.delete(
@@ -215,8 +172,8 @@ async def update_model(
     },
 )
 async def delete_model(
-    llm_model: LLMModel = Depends(validate_model),
-    db: AsyncSession = Depends(get_db_session),
+    llm_model_id: UUID,
+    service: LLMModelService = Depends(get_model_service),
 ) -> None:
     """
     ## Delete a Specific LLM Model Configuration
@@ -229,4 +186,4 @@ async def delete_model(
     ### Returns
     No content on successful deletion
     """
-    await crud_model.delete(db=db, id=llm_model.id)
+    await service.delete_model(llm_model_id=llm_model_id)

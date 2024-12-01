@@ -2,8 +2,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.chat.constants import llm_defaults
 from app.chat.schemas.common import ChatUsage
-from app.core.config import settings
 
 
 class CompletionParams(BaseModel):
@@ -11,8 +11,8 @@ class CompletionParams(BaseModel):
     Parameters for completion generation
     """
 
-    max_tokens: int = Field(default=settings.DEFAULT_MAX_TOKENS, gt=0)
-    temperature: float = Field(default=settings.DEFAULT_TEMPERATURE, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=llm_defaults.MAX_TOKENS, gt=0)
+    temperature: float = Field(default=llm_defaults.TEMPERATURE, ge=0.0, le=2.0)
 
 
 class CompletionRequest(BaseModel):
@@ -24,8 +24,8 @@ class CompletionRequest(BaseModel):
     llm_model_id: UUID
     prompt: str
     parent_id: UUID | None = None
-    max_tokens: int = Field(default=settings.DEFAULT_MAX_TOKENS, gt=0)
-    temperature: float = Field(default=settings.DEFAULT_TEMPERATURE, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=llm_defaults.MAX_TOKENS, gt=0)
+    temperature: float = Field(default=llm_defaults.TEMPERATURE, ge=0.0, le=2.0)
 
 
 class CompletionResponse(BaseModel):

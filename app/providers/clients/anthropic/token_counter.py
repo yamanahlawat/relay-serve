@@ -5,7 +5,7 @@ from anthropic.types import MessageParam
 
 from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
-from app.providers.base.token_counter import TokenCounterBase
+from app.providers.clients.base import TokenCounterBase
 from app.providers.models import LLMProvider
 
 
