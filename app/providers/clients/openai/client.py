@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletion
 
 from app.chat.constants import MessageRole, llm_defaults
 from app.chat.models import ChatMessage
-from app.providers.base import LLMProviderBase
+from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import OpenAIModelName, ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,

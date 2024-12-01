@@ -11,13 +11,13 @@ from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.message import MessageUsage
-from app.providers.base.provider import LLMProviderBase
+from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
+from app.providers.clients.base import LLMProviderBase
+from app.providers.clients.utils import get_token_counter
 from app.providers.crud.model import crud_model
 from app.providers.crud.provider import crud_provider
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMModel, LLMProvider
-from app.providers.services import AnthropicProvider, OllamaProvider, OpenAIProvider
-from app.providers.services.utils import get_token_counter
 
 
 class ChatCompletionService:

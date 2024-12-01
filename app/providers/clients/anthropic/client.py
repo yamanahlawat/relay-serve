@@ -15,7 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.chat.constants import MessageRole, llm_defaults
 from app.chat.models import ChatMessage
-from app.providers.base import LLMProviderBase
+from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ClaudeModelName, ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,

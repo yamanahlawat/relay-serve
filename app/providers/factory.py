@@ -1,6 +1,6 @@
 from typing import Type
 
-from app.providers.base.provider import LLMProviderBase
+from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import ProviderConfigurationError
 from app.providers.models import LLMProvider

@@ -6,7 +6,7 @@ from ollama import AsyncClient, Message, ResponseError
 
 from app.chat.constants import MessageRole, llm_defaults
 from app.chat.models import ChatMessage
-from app.providers.base.provider import LLMProviderBase
+from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
