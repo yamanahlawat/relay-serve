@@ -32,6 +32,7 @@ class SessionRead(BaseModel):
     provider_id: UUID
     llm_model_id: UUID
     created_at: datetime
+    updated_at: datetime
     last_message_at: datetime | None
     usage: ChatUsage | None = None
     extra_data: dict[str, Any]

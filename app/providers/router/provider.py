@@ -1,14 +1,14 @@
 from typing import Sequence
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.error import ErrorResponseModel
-from app.database.dependencies import get_db_session
-from app.providers.crud import crud_provider
-from app.providers.dependencies import validate_provider
+from app.providers.dependencies import get_provider_service
+from app.providers.exceptions import DuplicateProviderException, ProviderNotFoundException
 from app.providers.models import LLMProvider
 from app.providers.schemas import ProviderCreate, ProviderRead, ProviderUpdate
+from app.providers.services import LLMProviderService
 
 router = APIRouter(prefix="/providers", tags=["Providers"])
 
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/providers", tags=["Providers"])
 )
 async def create_provider(
     provider_in: ProviderCreate,
-    db: AsyncSession = Depends(get_db_session),
+    service: LLMProviderService = Depends(get_provider_service),
 ) -> LLMProvider:
     """
     ## Create a New LLM Provider
@@ -47,16 +47,13 @@ async def create_provider(
     ### Returns
     The created provider configuration
     """
-    # Check if provider with same name already exists
-    filters = [crud_provider.model.name == provider_in.name]
-    existing_provider = await crud_provider.filter(db=db, filters=filters)
-    if existing_provider:
+    try:
+        return await service.create_provider(provider_in=provider_in)
+    except DuplicateProviderException as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Provider with name {provider_in.name.value} already exists",
+            detail=f"Provider with name {e.name} already exists",
         )
-
-    return await crud_provider.create(db=db, obj_in=provider_in)
 
 
 @router.get(
@@ -67,7 +64,7 @@ async def create_provider(
     },
 )
 async def list_providers(
-    db: AsyncSession = Depends(get_db_session),
+    service: LLMProviderService = Depends(get_provider_service),
     offset: int = 0,
     limit: int = 10,
 ) -> Sequence[LLMProvider]:
@@ -83,7 +80,7 @@ async def list_providers(
     ### Returns
     List of provider configurations with their details
     """
-    return await crud_provider.filter(db=db, offset=offset, limit=limit)
+    return await service.list_providers(offset=offset, limit=limit)
 
 
 @router.get(
@@ -104,8 +101,9 @@ async def list_providers(
     },
 )
 async def get_provider(
-    provider: ProviderRead = Depends(validate_provider),
-) -> ProviderRead:
+    provider_id: UUID,
+    service: LLMProviderService = Depends(get_provider_service),
+) -> LLMProvider:
     """
     ## Get a Specific LLM Provider
 
@@ -117,7 +115,13 @@ async def get_provider(
     ### Returns
     Detailed provider configuration information
     """
-    return provider
+    try:
+        return await service.get_provider(provider_id=provider_id)
+    except ProviderNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id {e.provider_id} not found",
+        )
 
 
 @router.patch(
@@ -139,8 +143,8 @@ async def get_provider(
 )
 async def update_provider(
     provider_in: ProviderUpdate,
-    provider: ProviderRead = Depends(validate_provider),
-    db: AsyncSession = Depends(get_db_session),
+    provider_id: UUID,
+    service: LLMProviderService = Depends(get_provider_service),
 ) -> LLMProvider | None:
     """
     ## Update a Specific LLM Provider
@@ -157,16 +161,18 @@ async def update_provider(
     ### Returns
     Updated provider configuration
     """
-    if provider_in.name and provider_in.name != provider.name:
-        # Check if provider with new name already exists
-        filters = [crud_provider.model.name == provider_in.name]
-        existing_provider = await crud_provider.filter(db=db, filters=filters)
-        if existing_provider:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Provider with name {provider_in.name} already exists",
-            )
-    return await crud_provider.update(db=db, id=provider.id, obj_in=provider_in)
+    try:
+        return await service.update_provider(provider_id=provider_id, provider_in=provider_in)
+    except ProviderNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id {e.provider_id} not found",
+        )
+    except DuplicateProviderException as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Provider with name {e.name} already exists",
+        )
 
 
 @router.delete(
@@ -187,8 +193,8 @@ async def update_provider(
     },
 )
 async def delete_provider(
-    provider: ProviderRead = Depends(validate_provider),
-    db: AsyncSession = Depends(get_db_session),
+    provider_id: UUID,
+    service: LLMProviderService = Depends(get_provider_service),
 ) -> None:
     """
     ## Delete a Specific LLM Provider
@@ -201,4 +207,10 @@ async def delete_provider(
     ### Returns
     No content on successful deletion
     """
-    await crud_provider.delete(db=db, id=provider.id)
+    try:
+        await service.delete_provider(provider_id=provider_id)
+    except ProviderNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider with id {e.provider_id} not found",
+        )
