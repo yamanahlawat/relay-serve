@@ -1,13 +1,14 @@
 from typing import Sequence
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.schemas.error import ErrorResponseModel
-from app.providers.dependencies.model import get_model_service
+from app.providers.dependencies import get_model_service
+from app.providers.exceptions import DuplicateModelException, ModelNotFoundException, ProviderNotFoundException
 from app.providers.models import LLMModel
 from app.providers.schemas import ModelCreate, ModelRead, ModelUpdate
-from app.providers.services.model import LLMModelService
+from app.providers.services import LLMModelService
 
 router = APIRouter(prefix="/models", tags=["Models"])
 
@@ -55,7 +56,18 @@ async def create_model(
     - **config**: Model-specific configuration parameters
     - **is_active**: Whether the model is active (default: True)
     """
-    return await service.create_model(model_in=model_in)
+    try:
+        return await service.create_model(model_in=model_in)
+    except ProviderNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except DuplicateModelException as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
 
 
 @router.get(
@@ -115,7 +127,13 @@ async def get_model(
     ### Returns
     Detailed model configuration information
     """
-    return await service.get_model(llm_model_id=llm_model_id)
+    try:
+        return await service.get_model(llm_model_id=llm_model_id)
+    except ModelNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
 
 
 @router.patch(
@@ -153,7 +171,18 @@ async def update_model(
     ### Returns
     Updated model configuration
     """
-    return await service.update_model(llm_model_id=llm_model_id, model_in=model_in)
+    try:
+        return await service.update_model(llm_model_id=llm_model_id, model_in=model_in)
+    except ModelNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except DuplicateModelException as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
 
 
 @router.delete(
@@ -186,4 +215,10 @@ async def delete_model(
     ### Returns
     No content on successful deletion
     """
-    await service.delete_model(llm_model_id=llm_model_id)
+    try:
+        await service.delete_model(llm_model_id=llm_model_id)
+    except ModelNotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )

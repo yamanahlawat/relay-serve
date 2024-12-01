@@ -2,7 +2,7 @@ from typing import Any, Generic, Sequence, Type, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
@@ -61,8 +61,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             Sequence[ModelType]: List of instances of the ModelType
         """
         if order_on is None:
-            # Default ordering by model's ID
-            order_on = [self.model.id]
+            # Default ordering by created_at
+            order_on = [desc(self.model.created_at)]
         query = select(self.model)
         if filters:
             query = query.where(*filters)
