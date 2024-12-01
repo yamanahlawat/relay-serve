@@ -15,7 +15,6 @@ dependencies = [
     "loguru>=0.7.2",
     "sentry-sdk[fastapi,sqlalchemy]>=2.18.0",
     "langfuse>=2.53.9",
-    "tenacity>=9.0.0",
     "tiktoken>=0.8.0",
     "redis[hiredis]>=5.2.0",
 ]

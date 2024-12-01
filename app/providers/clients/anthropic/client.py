@@ -1,6 +1,5 @@
 from typing import AsyncGenerator, Sequence
 
-import httpx
 from anthropic import (
     APIConnectionError,
     APIError,
@@ -11,7 +10,6 @@ from anthropic import (
 )
 from anthropic.types import MessageParam
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.chat.constants import MessageRole, llm_defaults
 from app.chat.models import ChatMessage
@@ -35,84 +33,10 @@ class AnthropicProvider(LLMProviderBase):
     # Connection settings
     MAX_RETRIES = 3
     REQUEST_TIMEOUT = 60.0  # seconds
-    BACKOFF_MIN = 1  # seconds
-    BACKOFF_MAX = 10  # seconds
 
     def __init__(self, provider: LLMProvider) -> None:
         super().__init__(provider)
-
-        # Initialize aiohttp session with connection pooling
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self.REQUEST_TIMEOUT),
-            limits=httpx.Limits(
-                max_keepalive_connections=100,
-                max_connections=100,
-                keepalive_expiry=300,
-            ),
-        )
-        # Initialize Anthropic client with retry settings
-        self._client = AsyncAnthropic(
-            api_key=self.provider.api_key,
-            base_url=self.provider.base_url or None,
-            timeout=self.REQUEST_TIMEOUT,
-            max_retries=self.MAX_RETRIES,
-            http_client=self._http_client,
-        )
         self._last_usage = None
-
-    async def close(self):
-        """Close the http client."""
-        if self._http_client:
-            await self._http_client.aclose()
-
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=BACKOFF_MIN, max=BACKOFF_MAX),
-        reraise=True,
-    )
-    async def _make_request(self, func, *args, **kwargs):
-        """
-        Make a request with retry logic and proper error handling.
-        """
-        try:
-            return await func(*args, **kwargs)
-        except APIConnectionError as error:
-            logger.error(f"Connection error during request: {error}")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error="Failed to connect to Anthropic API",
-            ) from error
-        except RateLimitError as error:
-            logger.warning(f"Rate limit exceeded: {error}")
-            raise ProviderRateLimitError(
-                provider=self.provider_type,
-                error="Anthropic API rate limit exceeded",
-            ) from error
-        except AuthenticationError as error:
-            logger.error(f"Authentication error: {error}")
-            raise ProviderConfigurationError(
-                provider=self.provider_type,
-                error="Invalid Anthropic API credentials",
-            ) from error
-        except APIStatusError as error:
-            logger.error(f"API status error: {error}")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=error.status_code,
-                error=f"Anthropic API error: {error}",
-            ) from error
-        except APIError as error:
-            logger.error(f"General API error: {error}")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=getattr(error, "status_code", 500),
-                error=f"Unexpected Anthropic API error: {error}",
-            ) from error
-        except Exception as error:
-            logger.error(f"Unexpected error during request: {error}")
-            raise ProviderAPIError(
-                provider=self.provider_type, status_code=500, error=f"Unexpected error: {error}"
-            ) from error
 
     def _prepare_messages(self, messages: Sequence[ChatMessage], new_prompt: str) -> list[MessageParam]:
         """
@@ -155,9 +79,14 @@ class AnthropicProvider(LLMProviderBase):
             Tuple of (chunk text, is_final)
         """
         message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
-
+        client = AsyncAnthropic(
+            api_key=self.provider.api_key,
+            base_url=self.provider.base_url or None,
+            timeout=self.REQUEST_TIMEOUT,
+            max_retries=self.MAX_RETRIES,
+        )
         try:
-            async with self._client.messages.stream(
+            async with client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -192,29 +121,42 @@ class AnthropicProvider(LLMProviderBase):
         messages: Sequence[ChatMessage] | None = None,
         max_tokens: int = llm_defaults.MAX_TOKENS,
         temperature: float = llm_defaults.TEMPERATURE,
-    ) -> tuple[str, int, int]:
+    ) -> tuple[str, int, int] | None:
         """
         Generate text using Anthropic Claude with improved error handling and retries.
         """
-        message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
+        try:
+            message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
+            client = AsyncAnthropic(
+                api_key=self.provider.api_key,
+                base_url=self.provider.base_url or None,
+                timeout=self.REQUEST_TIMEOUT,
+                max_retries=self.MAX_RETRIES,
+            )
+            response = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=message_params,
+                system=system_context,
+            )
 
-        response = await self._make_request(
-            self._client.messages.create,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=message_params,
-            system=system_context,
-        )
+            self._last_usage = response.usage
+            generated_text = response.content[0].text if response.content else ""
 
-        self._last_usage = response.usage
-        generated_text = response.content[0].text if response.content else ""
-
-        return (
-            generated_text,
-            self._last_usage.input_tokens,
-            self._last_usage.output_tokens,
-        )
+            return (
+                generated_text,
+                self._last_usage.input_tokens,
+                self._last_usage.output_tokens,
+            )
+        except (
+            APIConnectionError,
+            RateLimitError,
+            AuthenticationError,
+            APIStatusError,
+            APIError,
+        ) as error:
+            self._handle_api_error(error)
 
     def _handle_api_error(self, error: APIError) -> None:
         """
@@ -247,7 +189,7 @@ class AnthropicProvider(LLMProviderBase):
                 message=error.message,
                 error=str(error),
             )
-        elif isinstance(error, APIError):
+        else:
             logger.exception("Anthropic API error during generation")
             raise ProviderAPIError(
                 provider=self.provider_type,

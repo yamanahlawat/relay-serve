@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import status
 
-from app.core.exceptions import RelayException
+from app.api.exceptions import RelayException
 from app.providers.constants import ProviderErrorCode, ProviderType
 
 
