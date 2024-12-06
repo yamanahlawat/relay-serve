@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.crud import crud_session
-from app.chat.exceptions.session import SessionNotFoundException
+from app.chat.exceptions.session import ActiveSessionNotFoundException, SessionNotFoundException
 from app.chat.models.session import ChatSession
 from app.chat.schemas.session import SessionCreate, SessionUpdate
 from app.providers.exceptions.model import InvalidModelProviderException
@@ -31,6 +31,12 @@ class ChatSessionService:
         session = await crud_session.get(self.db, id=session_id)
         if not session:
             raise SessionNotFoundException(session_id=session_id)
+        return session
+
+    async def get_active_session(self, session_id: UUID) -> ChatSession:
+        session = await crud_session.get_active(db=self.db, id=session_id)
+        if not session:
+            raise ActiveSessionNotFoundException(session_id=session_id)
         return session
 
     async def update_session(self, session_id: UUID, session_in: SessionUpdate) -> ChatSession | None:

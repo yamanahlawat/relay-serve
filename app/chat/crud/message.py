@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Sequence
 from uuid import UUID
 
@@ -102,30 +101,6 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
 
         result = await db.execute(query)
         return result.scalars().all()
-
-    async def mark_failed(self, db: AsyncSession, id: UUID, error_code: str, error_message: str) -> ChatMessage | None:
-        """
-        Mark a message as failed with error details.
-        Args:
-            db: Database session
-            id: Message ID to update
-            error_code: Error code to set
-            error_message: Error message to set
-        Returns:
-            Updated ChatMessage if found, else None
-        """
-        return await self.update(
-            db=db,
-            id=id,
-            obj_in=MessageUpdate(
-                status=MessageStatus.FAILED,
-                extra_data={
-                    "error_code": error_code,
-                    "error_message": error_message,
-                    "failed_at": datetime.now(timezone.utc).isoformat(),
-                },
-            ),
-        )
 
 
 crud_message = CRUDMessage(model=ChatMessage)
