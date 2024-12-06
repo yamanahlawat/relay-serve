@@ -1,14 +1,14 @@
 from typing import Sequence
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.crud import crud_session
-from app.chat.dependencies import validate_session
+from app.chat.dependencies import get_chat_session_service
+from app.chat.exceptions.session import SessionNotFoundException
 from app.chat.models import ChatSession
 from app.chat.schemas import SessionCreate, SessionRead, SessionUpdate
-from app.database.dependencies import get_db_session
-from app.providers.crud import crud_model, crud_provider
+from app.chat.services import ChatSessionService
+from app.providers.exceptions import InvalidModelProviderException
 
 router = APIRouter(prefix="/sessions", tags=["Chat Sessions"])
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/sessions", tags=["Chat Sessions"])
 @router.post("/", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
 async def create_chat_session(
     session_in: SessionCreate,
-    db: AsyncSession = Depends(get_db_session),
+    service: ChatSessionService = Depends(get_chat_session_service),
 ) -> ChatSession:
     """
     ## Create Chat Session
@@ -36,31 +36,20 @@ async def create_chat_session(
     - **404**: Provider or model not found
     - **400**: Invalid provider/model combination
     """
-    # Verify provider exists
-    provider = await crud_provider.get(db=db, id=session_in.provider_id)
-    if not provider:
+    try:
+        return await service.create_session(session_in=session_in)
+    except InvalidModelProviderException as error:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Provider {session_in.provider_id} not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error.message,
         )
-
-    # Verify model exists and belongs to provider
-    model = await crud_model.get(db=db, id=session_in.llm_model_id)
-    if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model {session_in.llm_model_id} not found")
-    if model.provider_id != provider.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Model does not belong to the specified provider"
-        )
-
-    session = await crud_session.create(db=db, obj_in=session_in)
-    return session
 
 
 @router.get("/", response_model=list[SessionRead])
 async def list_chat_sessions(
     offset: int = 0,
     limit: int = 10,
-    db: AsyncSession = Depends(get_db_session),
+    service: ChatSessionService = Depends(get_chat_session_service),
 ) -> Sequence[ChatSession]:
     """
     ## List Chat Sessions
@@ -76,12 +65,13 @@ async def list_chat_sessions(
     ### Raises
     - **400**: Invalid request parameters
     """
-    return await crud_session.filter(db=db, offset=offset, limit=limit)
+    return await service.list_sessions(offset=offset, limit=limit)
 
 
 @router.get("/{session_id}/", response_model=SessionRead)
 async def get_chat_session(
-    session: ChatSession = Depends(dependency=validate_session),
+    session_id: UUID,
+    service: ChatSessionService = Depends(get_chat_session_service),
 ) -> ChatSession:
     """
     ## Get Chat Session
@@ -96,15 +86,18 @@ async def get_chat_session(
     ### Raises
     - **404**: Session not found
     """
-    return session
+    try:
+        return await service.get_session(session_id=session_id)
+    except SessionNotFoundException as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.message)
 
 
 @router.patch("/{session_id}/", response_model=SessionRead)
 async def update_chat_session(
     session_in: SessionUpdate,
-    session: ChatSession = Depends(dependency=validate_session),
-    db: AsyncSession = Depends(get_db_session),
-) -> ChatSession:
+    session_id: UUID,
+    service: ChatSessionService = Depends(get_chat_session_service),
+) -> ChatSession | None:
     """
     ## Update Chat Session
     Updates the details of a specific chat session.
@@ -122,13 +115,16 @@ async def update_chat_session(
     - **404**: Session not found
     - **400**: Invalid request parameters
     """
-    return await crud_session.update(db=db, id=session.id, obj_in=session_in)
+    try:
+        return await service.update_session(session_id=session_id, session_in=session_in)
+    except SessionNotFoundException as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.message)
 
 
 @router.delete("/{session_id}/", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
-    session: ChatSession = Depends(dependency=validate_session),
-    db: AsyncSession = Depends(get_db_session),
+    session_id: UUID,
+    service: ChatSessionService = Depends(get_chat_session_service),
 ) -> None:
     """
     ## Delete Chat Session
@@ -140,4 +136,7 @@ async def delete_chat_session(
     ### Raises
     - **404**: Session not found
     """
-    await crud_session.delete(db=db, id=session.id)
+    try:
+        await service.delete_session(session_id=session_id)
+    except SessionNotFoundException as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.message)

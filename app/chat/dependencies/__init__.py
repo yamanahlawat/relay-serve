@@ -1,7 +1,7 @@
-from app.chat.dependencies.message import validate_message
-from app.chat.dependencies.session import validate_session
+from app.chat.dependencies.message import get_chat_message_service
+from app.chat.dependencies.session import get_chat_session_service
 
 __all__ = [
-    "validate_session",
-    "validate_message",
+    "get_chat_message_service",
+    "get_chat_session_service",
 ]

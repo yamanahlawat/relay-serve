@@ -13,7 +13,7 @@ class LLMProviderService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def _check_duplicate_name(self, provider_name: str) -> None:
+    async def check_duplicate_name(self, provider_name: str) -> None:
         # Check if provider with same name already exists
         filters = [crud_provider.model.name == provider_name]
         existing_provider = await crud_provider.filter(db=self.db, filters=filters)
@@ -21,7 +21,7 @@ class LLMProviderService:
             raise DuplicateProviderException(name=provider_name)
 
     async def create_provider(self, provider_in: ProviderCreate) -> LLMProvider:
-        await self._check_duplicate_name(provider_in.name)
+        await self.check_duplicate_name(provider_in.name)
         return await crud_provider.create(db=self.db, obj_in=provider_in)
 
     async def list_providers(self, offset: int = 0, limit: int = 10) -> Sequence[LLMProvider]:
@@ -36,7 +36,7 @@ class LLMProviderService:
     async def update_provider(self, provider_id: UUID, provider_in: ProviderUpdate) -> LLMProvider | None:
         provider = await self.get_provider(provider_id=provider_id)
         if provider_in.name and provider_in.name != provider.name:
-            await self._check_duplicate_name(provider_in.name)
+            await self.check_duplicate_name(provider_in.name)
         return await crud_provider.update(db=self.db, id=provider.id, obj_in=provider_in)
 
     async def delete_provider(self, provider_id: UUID):
