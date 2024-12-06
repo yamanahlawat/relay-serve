@@ -5,12 +5,17 @@ from app.providers.exceptions.client import (
     ProviderException,
     ProviderRateLimitError,
 )
-from app.providers.exceptions.model import DuplicateModelException, ModelNotFoundException
+from app.providers.exceptions.model import (
+    DuplicateModelException,
+    InvalidModelProviderException,
+    ModelNotFoundException,
+)
 from app.providers.exceptions.provider import DuplicateProviderException, ProviderNotFoundException
 
 __all__ = [
     "DuplicateModelException",
     "ModelNotFoundException",
+    "InvalidModelProviderException",
     "ProviderNotFoundException",
     "DuplicateProviderException",
     "ProviderException",

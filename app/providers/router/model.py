@@ -58,15 +58,15 @@ async def create_model(
     """
     try:
         return await service.create_model(model_in=model_in)
-    except ProviderNotFoundException as e:
+    except ProviderNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=error.message,
         )
-    except DuplicateModelException as e:
+    except DuplicateModelException as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(e),
+            detail=error.message,
         )
 
 
@@ -129,10 +129,10 @@ async def get_model(
     """
     try:
         return await service.get_model(llm_model_id=llm_model_id)
-    except ModelNotFoundException as e:
+    except ModelNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=error.message,
         )
 
 
@@ -173,15 +173,15 @@ async def update_model(
     """
     try:
         return await service.update_model(llm_model_id=llm_model_id, model_in=model_in)
-    except ModelNotFoundException as e:
+    except ModelNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=error.message,
         )
-    except DuplicateModelException as e:
+    except DuplicateModelException as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(e),
+            detail=error.message,
         )
 
 
@@ -217,8 +217,8 @@ async def delete_model(
     """
     try:
         await service.delete_model(llm_model_id=llm_model_id)
-    except ModelNotFoundException as e:
+    except ModelNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail=error.message,
         )

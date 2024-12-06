@@ -49,10 +49,10 @@ async def create_provider(
     """
     try:
         return await service.create_provider(provider_in=provider_in)
-    except DuplicateProviderException as e:
+    except DuplicateProviderException as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Provider with name {e.name} already exists",
+            detail=error.message,
         )
 
 
@@ -117,10 +117,10 @@ async def get_provider(
     """
     try:
         return await service.get_provider(provider_id=provider_id)
-    except ProviderNotFoundException as e:
+    except ProviderNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Provider with id {e.provider_id} not found",
+            detail=error.message,
         )
 
 
@@ -163,15 +163,15 @@ async def update_provider(
     """
     try:
         return await service.update_provider(provider_id=provider_id, provider_in=provider_in)
-    except ProviderNotFoundException as e:
+    except ProviderNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Provider with id {e.provider_id} not found",
+            detail=error.message,
         )
-    except DuplicateProviderException as e:
+    except DuplicateProviderException as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Provider with name {e.name} already exists",
+            detail=error.message,
         )
 
 
@@ -209,8 +209,8 @@ async def delete_provider(
     """
     try:
         await service.delete_provider(provider_id=provider_id)
-    except ProviderNotFoundException as e:
+    except ProviderNotFoundException as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Provider with id {e.provider_id} not found",
+            detail=error.message,
         )
