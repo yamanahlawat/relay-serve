@@ -42,6 +42,9 @@ class ChatSession(TimeStampedBase):
         back_populates="session", cascade="all, delete-orphan", order_by=ChatMessage.created_at
     )
 
+    provider: Mapped[LLMProvider] = relationship("LLMProvider", back_populates="sessions")
+    llm_model: Mapped[LLMModel] = relationship("LLMModel", back_populates="sessions")
+
     # Computed properties for totals
     total_input_tokens = column_property(
         select(func.coalesce(func.sum(ChatMessage.input_tokens), 0))

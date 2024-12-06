@@ -9,6 +9,7 @@ from app.database.base_class import TimeStampedBase
 from app.providers.constants import ProviderType
 
 if TYPE_CHECKING:
+    from app.chat.models.session import ChatSession
     from app.providers.models.model import LLMModel
 
 
@@ -30,5 +31,6 @@ class LLMProvider(TimeStampedBase):
 
     # Relationships
     models: Mapped[list["LLMModel"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
+    sessions: Mapped[list["ChatSession"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
 
     __table_args__ = (UniqueConstraint("name", name="uq_provider_name"),)
