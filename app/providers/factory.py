@@ -18,7 +18,7 @@ class ProviderFactory:
         """
         Register a provider implementation for a specific provider type.
         Args:
-            provider_type: Type of the provider (OPENAI, ANTHROPIC, etc.)
+            provider_type: Type of the provider (OPENAI, ANTHROPIC, Ollama etc.)
             provider_class: Provider implementation class
         """
         cls._providers[provider_type] = provider_class
