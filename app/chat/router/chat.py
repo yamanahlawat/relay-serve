@@ -166,7 +166,6 @@ async def complete(
     # Validate request and get required models
     chat_session, provider, model = await service.validate_request(
         session_id=session_id,
-        request=request,
     )
 
     # Create user message

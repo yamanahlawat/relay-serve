@@ -1,21 +1,20 @@
 from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from langfuse.decorators import langfuse_context, observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus
-from app.chat.crud import crud_message, crud_session
+from app.chat.crud import crud_message
 from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.message import MessageUsage
+from app.chat.services import ChatSessionService
+from app.chat.services.message import ChatMessageService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
 from app.providers.clients.utils import get_token_counter
-from app.providers.crud.model import crud_model
-from app.providers.crud.provider import crud_provider
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMModel, LLMProvider
 
@@ -27,11 +26,11 @@ class ChatCompletionService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self.message_service = ChatMessageService(db=self.db)
 
     async def validate_request(
         self,
         session_id: UUID,
-        request: CompletionRequest,
     ) -> tuple[ChatSession, LLMProvider, LLMModel]:
         """
         Validate the chat completion request and return required models.
@@ -44,30 +43,9 @@ class ChatCompletionService:
             HTTPException: If session, provider or model not found
         """
         # Verify session exists and is active
-        chat_session = await crud_session.get_active(db=self.db, id=session_id)
-        if not chat_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Active chat session {session_id} not found",
-            )
-
-        # Get provider
-        provider = await crud_provider.get(db=self.db, id=request.provider_id)
-        if not provider:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider {request.provider_id} not found",
-            )
-
-        # Get model
-        model = await crud_model.get(db=self.db, id=request.llm_model_id)
-        if not model:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model {request.llm_model_id} not found",
-            )
-
-        return chat_session, provider, model
+        session_service = ChatSessionService(db=self.db)
+        active_session = await session_service.get_active_session(session_id=session_id)
+        return active_session, active_session.provider, active_session.llm_model
 
     async def validate_message(
         self,
@@ -84,43 +62,10 @@ class ChatCompletionService:
         Raises:
             HTTPException: If session, message not found
         """
-        # Verify session exists and is active
-        chat_session = await crud_session.get_active(db=self.db, id=session_id)
-        if not chat_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Active chat session {session_id} not found",
-            )
-
+        active_session, provider, llm_model = await self.validate_request(session_id=session_id)
         # Get message and verify it belongs to session
-        message = await crud_message.get(db=self.db, id=message_id)
-        if not message:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Message {message_id} not found",
-            )
-        if message.session_id != session_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Message belongs to different session",
-            )
-
-        # Get provider and model from session
-        provider = await crud_provider.get(db=self.db, id=chat_session.provider_id)
-        if not provider:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider {chat_session.provider_id} not found",
-            )
-
-        model = await crud_model.get(db=self.db, id=chat_session.llm_model_id)
-        if not model:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model {chat_session.llm_model_id} not found",
-            )
-
-        return chat_session, provider, model
+        await self.message_service.get_message(session_id=session_id, message_id=message_id)
+        return active_session, provider, llm_model
 
     async def create_user_message(
         self,
@@ -259,12 +204,10 @@ class ChatCompletionService:
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response"""
         # Get the message
-        message = await crud_message.get(db=self.db, id=message_id)
-        if not message:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Message {message_id} not found",
-            )
+        message = await self.message_service.get_message(
+            session_id=chat_session.id,
+            message_id=message_id,
+        )
 
         history = await self.get_conversation_history(
             chat_session=chat_session,
