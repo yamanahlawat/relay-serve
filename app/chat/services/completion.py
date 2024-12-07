@@ -24,8 +24,13 @@ class ChatCompletionService:
     Service for handling chat completions
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        provider_factory: ProviderFactory,
+    ) -> None:
         self.db = db
+        self.provider_factory = provider_factory
         self.message_service = ChatMessageService(db=self.db)
 
     async def validate_request(
@@ -39,8 +44,6 @@ class ChatCompletionService:
             request: Chat completion request
         Returns:
             Tuple of (ChatSession, LLMProvider, LLMModel)
-        Raises:
-            HTTPException: If session, provider or model not found
         """
         # Verify session exists and is active
         session_service = ChatSessionService(db=self.db)
@@ -59,8 +62,6 @@ class ChatCompletionService:
             message_id: UUID of the message
         Returns:
             Tuple of (ChatSession, LLMProvider, LLMModel)
-        Raises:
-            HTTPException: If session, message not found
         """
         active_session, provider, llm_model = await self.validate_request(session_id=session_id)
         # Get message and verify it belongs to session
@@ -112,10 +113,8 @@ class ChatCompletionService:
             provider: LLM provider configuration
         Returns:
             Provider-specific client instance
-        Raises:
-            HTTPException: If provider type is not supported
         """
-        return ProviderFactory.get_client(provider=provider)
+        return self.provider_factory.get_client(provider=provider)
 
     async def get_conversation_history(
         self,

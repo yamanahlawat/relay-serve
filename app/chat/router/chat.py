@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.error import ErrorResponseModel
+from app.chat.dependencies.chat import get_chat_service
 from app.chat.schemas import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.services.completion import ChatCompletionService
 from app.chat.services.sse import SSEConnectionManager, get_sse_manager
@@ -55,6 +56,7 @@ async def stream_completion(
     params: CompletionParams = Depends(),
     db: AsyncSession = Depends(get_db_session),
     sse_manager: SSEConnectionManager = Depends(get_sse_manager),
+    chat_service: ChatCompletionService = Depends(get_chat_service),
 ) -> StreamingResponse:
     """
     ## Stream Chat Completion
@@ -77,15 +79,14 @@ async def stream_completion(
     - **503**: Provider service unavailable
     """
     # Validate session, message, and model
-    service = ChatCompletionService(db=db)
-    chat_session, provider, model = await service.validate_message(session_id=session_id, message_id=message_id)
+    chat_session, provider, model = await chat_service.validate_message(session_id=session_id, message_id=message_id)
 
-    provider_client = service.get_provider_client(provider=provider)
+    provider_client = chat_service.get_provider_client(provider=provider)
 
     return StreamingResponse(
         sse_manager.stream_generator(
             session_id=session_id,
-            generator=service.generate_stream(
+            generator=chat_service.generate_stream(
                 chat_session=chat_session,
                 model=model,
                 provider_client=provider_client,
@@ -137,6 +138,7 @@ async def complete(
     session_id: UUID,
     request: CompletionRequest,
     db: AsyncSession = Depends(get_db_session),
+    chat_service: ChatCompletionService = Depends(get_chat_service),
 ) -> CompletionResponse:
     """
     ## Generate Chat Completion
@@ -161,15 +163,14 @@ async def complete(
     - **429**: Rate limit exceeded
     - **503**: Provider service unavailable
     """
-    service = ChatCompletionService(db=db)
 
     # Validate request and get required models
-    chat_session, provider, model = await service.validate_request(
+    chat_session, provider, model = await chat_service.validate_request(
         session_id=session_id,
     )
 
     # Create user message
-    user_message = await service.create_user_message(
+    user_message = await chat_service.create_user_message(
         session_id=session_id,
         content=request.prompt,
         provider=provider,
@@ -178,10 +179,10 @@ async def complete(
     )
 
     # Get provider client
-    provider_client = service.get_provider_client(provider=provider)
+    provider_client = chat_service.get_provider_client(provider=provider)
 
     # Generate completion
-    return await service.generate_complete(
+    return await chat_service.generate_complete(
         chat_session=chat_session,
         model=model,
         provider_client=provider_client,
