@@ -4,7 +4,7 @@ from typing import AsyncGenerator, Sequence
 from loguru import logger
 from ollama import AsyncClient, Message, ResponseError
 
-from app.chat.constants import MessageRole, llm_defaults
+from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
@@ -123,10 +123,11 @@ class OllamaProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Ollama.
@@ -153,6 +154,7 @@ class OllamaProvider(LLMProviderBase):
                 options={
                     "num_predict": max_tokens,
                     "temperature": temperature,
+                    "top_p": top_p,
                 },
             )
             async for chunk in await stream:
@@ -178,10 +180,11 @@ class OllamaProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> tuple[str, int, int] | None:
         """
         Generate text using Ollama.
@@ -205,6 +208,7 @@ class OllamaProvider(LLMProviderBase):
                 options={
                     "num_predict": max_tokens,
                     "temperature": temperature,
+                    "top_p": top_p,
                 },
             )
 

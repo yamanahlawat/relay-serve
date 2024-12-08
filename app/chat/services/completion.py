@@ -4,17 +4,19 @@ from uuid import UUID
 from langfuse.decorators import langfuse_context, observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.constants import MessageRole, MessageStatus
+from app.chat.constants import MessageRole, MessageStatus, error_messages, system_defaults
 from app.chat.crud import crud_message
 from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
+from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageUsage
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
 from app.providers.clients.utils import get_token_counter
+from app.providers.exceptions.client import ProviderAPIError, ProviderConnectionError, ProviderRateLimitError
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMModel, LLMProvider
 
@@ -192,6 +194,38 @@ class ChatCompletionService:
             },
         )
 
+    def get_model_params(
+        self,
+        model: LLMModel,
+        request_params: CompletionParams,
+    ) -> dict:
+        """
+        Get model parameters with request overrides.
+        Precedence: Request params > Model params > Global defaults
+        """
+        # Request params override model params
+        return {
+            "max_tokens": request_params.max_tokens or model.max_tokens,
+            "temperature": request_params.temperature or model.temperature,
+            "top_p": request_params.top_p or model.top_p,
+        }
+
+    def get_system_context(self, chat_session: ChatSession) -> str:
+        """
+        Get system context with fallback to default.
+        """
+        return chat_session.system_context or system_defaults.CONTEXT
+
+    async def handle_provider_error(self, error: Exception) -> str:
+        """
+        Handle provider errors and return user-friendly messages.
+        """
+        if isinstance(error, ProviderRateLimitError):
+            return error_messages.RATE_LIMIT_ERROR
+        elif isinstance(error, (ProviderConnectionError, ProviderAPIError)):
+            return error_messages.PROVIDER_ERROR
+        return error_messages.GENERAL_ERROR
+
     @observe(name="streaming")
     async def generate_stream(
         self,
@@ -201,56 +235,67 @@ class ChatCompletionService:
         params: CompletionParams,
         message_id: UUID,
     ) -> AsyncGenerator[str, None]:
-        """Generate streaming response"""
-        # Get the message
-        message = await self.message_service.get_message(
-            session_id=chat_session.id,
-            message_id=message_id,
-        )
+        """
+        Generate streaming response
+        """
+        try:
+            # Get the message
+            message = await self.message_service.get_message(
+                session_id=chat_session.id,
+                message_id=message_id,
+            )
 
-        history = await self.get_conversation_history(
-            chat_session=chat_session,
-            current_message_id=message_id,
-        )
-        full_content = ""
+            history = await self.get_conversation_history(
+                chat_session=chat_session,
+                current_message_id=message_id,
+            )
+            full_content = ""
 
-        async for chunk, is_final in provider_client.generate_stream(
-            prompt=message.content,
-            model=model.name,
-            system_context=chat_session.system_context,
-            messages=history,
-            max_tokens=params.max_tokens,
-            temperature=params.temperature,
-        ):
-            if chunk:
-                full_content += chunk
-                yield chunk
+            model_params = self.get_model_params(model=model, request_params=params)
+            system_context = self.get_system_context(chat_session=chat_session)
 
-            if is_final:
-                input_tokens, output_tokens = provider_client.get_token_usage()
-                assistant_message = await self.create_assistant_message(
-                    chat_session=chat_session,
-                    content=full_content,
-                    parent_id=message_id,
-                    model=model,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
+            async for chunk, is_final in provider_client.generate_stream(
+                prompt=message.content,
+                model=model.name,
+                system_context=system_context,
+                messages=history,
+                **model_params,
+            ):
+                if chunk:
+                    full_content += chunk
+                    yield chunk
 
-                self.update_langfuse_trace(
-                    chat_session=chat_session,
-                    assistant_message=assistant_message,
-                    user_message=message,
-                    model=model.name,
-                    usage={
-                        "input": input_tokens,
-                        "output": output_tokens,
-                    },
-                    model_parameters={
-                        "max_tokens": params.max_tokens,
-                        "temperature": params.temperature,
-                    },
-                )
+                if is_final:
+                    input_tokens, output_tokens = provider_client.get_token_usage()
+                    assistant_message = await self.create_assistant_message(
+                        chat_session=chat_session,
+                        content=full_content,
+                        parent_id=message_id,
+                        model=model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
+
+                    self.update_langfuse_trace(
+                        chat_session=chat_session,
+                        assistant_message=assistant_message,
+                        user_message=message,
+                        model=model.name,
+                        usage={
+                            "input": input_tokens,
+                            "output": output_tokens,
+                        },
+                        model_parameters={
+                            "max_tokens": params.max_tokens,
+                            "temperature": params.temperature,
+                            "top_p": params.top_p,
+                        },
+                    )
+
+        except Exception as error:
+            error_message = await self.handle_provider_error(error)
+            yield error_message
+            return
 
     @observe(name="non_streaming")
     async def generate_complete(
@@ -264,47 +309,58 @@ class ChatCompletionService:
         """
         Generate complete response
         """
-        # Get conversation history
-        history = await self.get_conversation_history(
-            chat_session=chat_session,
-            current_message_id=user_message.id,
-        )
+        try:
+            # Get conversation history
+            history = await self.get_conversation_history(
+                chat_session=chat_session,
+                current_message_id=user_message.id,
+            )
+            model_params = self.get_model_params(model=model, request_params=request.model_params)
+            system_context = self.get_system_context(chat_session=chat_session)
 
-        # Generate response with history
-        content, input_tokens, output_tokens = await provider_client.generate(
-            prompt=request.prompt,
-            model=model.name,
-            system_context=chat_session.system_context,
-            messages=history,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+            # Generate response with history
+            content, input_tokens, output_tokens = await provider_client.generate(
+                prompt=request.prompt,
+                model=model.name,
+                system_context=system_context,
+                messages=history,
+                **model_params,
+            )
 
-        assistant_message = await self.create_assistant_message(
-            chat_session=chat_session,
-            content=content,
-            parent_id=user_message.id,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
+            assistant_message = await self.create_assistant_message(
+                chat_session=chat_session,
+                content=content,
+                parent_id=user_message.id,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
 
-        # Update Langfuse context with the assistant message
-        self.update_langfuse_trace(
-            chat_session=chat_session,
-            assistant_message=assistant_message,
-            user_message=user_message,
-            model=model.name,
-            usage={"input": input_tokens, "output": output_tokens},
-            model_parameters={
-                "max_tokens": request.max_tokens,
-                "temperature": request.temperature,
-            },
-        )
+            # Update Langfuse context with the assistant message
+            self.update_langfuse_trace(
+                chat_session=chat_session,
+                assistant_message=assistant_message,
+                user_message=user_message,
+                model=model.name,
+                usage={"input": input_tokens, "output": output_tokens},
+                model_parameters={
+                    "max_tokens": request.model_params.max_tokens,
+                    "temperature": request.model_params.temperature,
+                    "top_p": request.model_params.top_p,
+                },
+            )
 
-        return CompletionResponse(
-            content=content,
-            model=model.name,
-            provider=provider_client.provider.name,
-            usage=assistant_message.get_usage(),
-        )
+            return CompletionResponse(
+                content=content,
+                model=model.name,
+                provider=provider_client.provider.name,
+                usage=ChatUsage(**assistant_message.get_usage()),
+            )
+        except Exception as error:
+            error_message = await self.handle_provider_error(error)
+            return CompletionResponse(
+                content=error_message,
+                model=model.name,
+                provider=provider_client.provider.type.value,
+                usage=ChatUsage(input_tokens=0, output_tokens=0, input_cost=0, output_cost=0, total_cost=0),
+            )
