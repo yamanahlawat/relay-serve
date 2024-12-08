@@ -11,7 +11,7 @@ from openai import (
 )
 from openai.types.chat import ChatCompletion
 
-from app.chat.constants import MessageRole, llm_defaults
+from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import OpenAIModelName, ProviderType
@@ -125,10 +125,11 @@ class OpenAIProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using OpenAI.
@@ -154,6 +155,7 @@ class OpenAIProvider(LLMProviderBase):
                 messages=formatted_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                top_p=top_p,
                 stream=True,
             )
 
@@ -190,10 +192,11 @@ class OpenAIProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> tuple[str, int, int] | None:
         """
         Generate text using OpenAI.
@@ -219,6 +222,7 @@ class OpenAIProvider(LLMProviderBase):
                 messages=formatted_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                top_p=top_p,
             )
 
             generated_text = response.choices[0].message.content or ""
