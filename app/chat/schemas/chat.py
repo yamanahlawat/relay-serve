@@ -13,6 +13,7 @@ class CompletionParams(BaseModel):
 
     max_tokens: int = Field(default=llm_defaults.MAX_TOKENS, gt=0)
     temperature: float = Field(default=llm_defaults.TEMPERATURE, ge=0.0, le=2.0)
+    top_p: float = Field(default=llm_defaults.TOP_P, ge=0.0, le=1.0)
 
 
 class CompletionRequest(BaseModel):
@@ -24,8 +25,7 @@ class CompletionRequest(BaseModel):
     llm_model_id: UUID
     prompt: str
     parent_id: UUID | None = None
-    max_tokens: int = Field(default=llm_defaults.MAX_TOKENS, gt=0)
-    temperature: float = Field(default=llm_defaults.TEMPERATURE, ge=0.0, le=2.0)
+    model_params: CompletionParams = CompletionParams()
 
 
 class CompletionResponse(BaseModel):

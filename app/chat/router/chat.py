@@ -2,14 +2,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.error import ErrorResponseModel
 from app.chat.dependencies.chat import get_chat_service
 from app.chat.schemas import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.services.completion import ChatCompletionService
 from app.chat.services.sse import SSEConnectionManager, get_sse_manager
-from app.database.dependencies import get_db_session
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -54,7 +52,6 @@ async def stream_completion(
     message_id: UUID,
     background_tasks: BackgroundTasks,
     params: CompletionParams = Depends(),
-    db: AsyncSession = Depends(get_db_session),
     sse_manager: SSEConnectionManager = Depends(get_sse_manager),
     chat_service: ChatCompletionService = Depends(get_chat_service),
 ) -> StreamingResponse:
@@ -137,7 +134,6 @@ async def stream_completion(
 async def complete(
     session_id: UUID,
     request: CompletionRequest,
-    db: AsyncSession = Depends(get_db_session),
     chat_service: ChatCompletionService = Depends(get_chat_service),
 ) -> CompletionResponse:
     """

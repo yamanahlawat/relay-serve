@@ -11,7 +11,7 @@ from anthropic import (
 from anthropic.types import MessageParam
 from loguru import logger
 
-from app.chat.constants import MessageRole, llm_defaults
+from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ClaudeModelName, ProviderType
@@ -62,10 +62,11 @@ class AnthropicProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Anthropic Claude.
@@ -75,6 +76,7 @@ class AnthropicProvider(LLMProviderBase):
             messages: Optional previous conversation messages
             max_tokens: Maximum tokens to generate
             temperature: Temperature for generation
+            top_p: Top-p sampling parameter
         Yields:
             Tuple of (chunk text, is_final)
         """
@@ -90,6 +92,7 @@ class AnthropicProvider(LLMProviderBase):
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                top_p=top_p,
                 messages=message_params,
                 system=system_context,
             ) as stream:
@@ -117,10 +120,11 @@ class AnthropicProvider(LLMProviderBase):
         self,
         prompt: str,
         model: str,
-        system_context: str = "",
+        system_context: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
         messages: Sequence[ChatMessage] | None = None,
-        max_tokens: int = llm_defaults.MAX_TOKENS,
-        temperature: float = llm_defaults.TEMPERATURE,
     ) -> tuple[str, int, int] | None:
         """
         Generate text using Anthropic Claude with improved error handling and retries.
@@ -137,6 +141,7 @@ class AnthropicProvider(LLMProviderBase):
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                top_p=top_p,
                 messages=message_params,
                 system=system_context,
             )
