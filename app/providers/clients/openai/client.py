@@ -159,11 +159,8 @@ class OpenAIProvider(LLMProviderBase):
                 stream=True,
             )
 
-            # Track full content for Langfuse
-            full_content = ""
             async for chunk in stream:
                 if chunk.choices and (content := chunk.choices[0].delta.content):
-                    full_content += content
                     yield (content, False)
 
                 # On last chunk, get usage metrics
