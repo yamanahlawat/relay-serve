@@ -24,8 +24,9 @@ class ChatSessionService:
             raise InvalidModelProviderException()
         return await crud_session.create(db=self.db, obj_in=session_in)
 
-    async def list_sessions(self, offset: int = 0, limit: int = 10) -> Sequence[ChatSession]:
-        return await crud_session.filter(db=self.db, offset=offset, limit=limit)
+    async def list_sessions(self, title: str | None = None, offset: int = 0, limit: int = 10) -> Sequence[ChatSession]:
+        filters = [ChatSession.title.ilike(f"%{title}%")] if title else []
+        return await crud_session.filter(db=self.db, filters=filters, offset=offset, limit=limit)
 
     async def get_session(self, session_id: UUID) -> ChatSession:
         session = await crud_session.get(self.db, id=session_id)
