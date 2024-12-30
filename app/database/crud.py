@@ -2,7 +2,7 @@ from typing import Any, Generic, Sequence, Type, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 
@@ -109,10 +109,16 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             ModelType | None: Instance of the ModelType for the updated record if found, else None
         """
+        db_obj = await db.get(self.model, id)
+        if not db_obj:
+            return None
+
         obj_in_data = obj_in.model_dump(mode="json", exclude_unset=True)
-        query = update(self.model).where(self.model.id == id).values(**obj_in_data).returning(self.model)
-        db_obj = await db.scalar(query)
+        for field, value in obj_in_data.items():
+            setattr(db_obj, field, value)
+
         await db.commit()
+        await db.refresh(db_obj)
         return db_obj
 
     async def delete(self, db: AsyncSession, *, id: UUID) -> ModelType | None:

@@ -54,6 +54,7 @@ async def create_chat_session(
 async def list_chat_sessions(
     offset: int = 0,
     limit: int = 10,
+    title: str | None = None,
     service: ChatSessionService = Depends(get_chat_session_service),
 ) -> Sequence[ChatSession]:
     """
@@ -70,7 +71,7 @@ async def list_chat_sessions(
     ### Raises
     - **400**: Invalid request parameters
     """
-    return await service.list_sessions(offset=offset, limit=limit)
+    return await service.list_sessions(offset=offset, limit=limit, title=title)
 
 
 @router.get("/{session_id}/", response_model=SessionRead)
