@@ -1,7 +1,7 @@
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus
@@ -66,7 +66,7 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         query = (
             select(self.model)
             .where(self.model.session_id == session_id)
-            .order_by(self.model.created_at)
+            .order_by(desc(self.model.created_at))
             .offset(offset)
             .limit(limit)
         )
