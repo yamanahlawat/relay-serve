@@ -5,29 +5,29 @@ description = "Simple yet effective open source LLM Studio."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "alembic>=1.14.0",
+    "alembic>=1.14.1",
     "asyncpg>=0.30.0",
-    "fastapi[standard]>=0.115.6",
-    "pydantic>=2.10.4",
-    "pydantic-settings>=2.7.0",
-    "sqlalchemy>=2.0.36",
+    "fastapi[standard]>=0.115.7",
+    "pydantic>=2.10.6",
+    "pydantic-settings>=2.7.1",
+    "sqlalchemy>=2.0.37",
     "greenlet>=3.1.1",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.19.2",
-    "langfuse>=2.57.1",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.20.0",
+    "langfuse>=2.57.12",
     "tiktoken>=0.8.0",
     "redis[hiredis]>=5.2.1",
 ]
 
 [dependency-groups]
 providers = [
-    "anthropic>=0.42.0",
-    "ollama>=0.4.4",
-    "openai>=1.58.1",
+    "anthropic>=0.45.0",
+    "ollama>=0.4.7",
+    "openai>=1.60.1",
 ]
 dev = [
     "ipdb>=0.13.13",
-    "pre-commit>=4.0.1",
-    "ruff>=0.8.4",
-    "tomli-w>=1.1.0",
+    "pre-commit>=4.1.0",
+    "ruff>=0.9.3",
+    "tomli-w>=1.2.0",
 ]
