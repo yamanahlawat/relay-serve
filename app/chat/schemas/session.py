@@ -49,4 +49,6 @@ class SessionUpdate(BaseModel):
     title: str | None = None
     status: SessionStatus | None = None
     system_context: str | None = None
+    provider_id: UUID | None = None
+    llm_model_id: UUID | None = None
     extra_data: dict[str, Any] | None = None
