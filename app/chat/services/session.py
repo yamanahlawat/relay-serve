@@ -42,6 +42,12 @@ class ChatSessionService:
 
     async def update_session(self, session_id: UUID, session_in: SessionUpdate) -> ChatSession | None:
         session = await self.get_session(session_id)
+        if session_in.provider_id:
+            provider_service = LLMProviderService(db=self.db)
+            await provider_service.get_provider(provider_id=session_in.provider_id)
+        if session_in.llm_model_id:
+            model_service = LLMModelService(db=self.db)
+            await model_service.get_model(llm_model_id=session_in.llm_model_id)
         return await crud_session.update(db=self.db, id=session.id, obj_in=session_in)
 
     async def delete_session(self, session_id: UUID) -> None:
