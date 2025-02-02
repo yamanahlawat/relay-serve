@@ -1,4 +1,5 @@
 from typing import AsyncGenerator, Sequence
+from uuid import UUID
 
 from anthropic import (
     APIConnectionError,
@@ -13,8 +14,9 @@ from loguru import logger
 
 from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
+from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
-from app.providers.constants import ClaudeModelName, ProviderType
+from app.providers.constants import ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
     ProviderConfigurationError,
@@ -37,15 +39,17 @@ class AnthropicProvider(LLMProviderBase):
     def __init__(self, provider: LLMProvider) -> None:
         super().__init__(provider)
         self._last_usage = None
+        # Initialize AsyncAnthropic client
+        self._client = AsyncAnthropic(
+            api_key=self.provider.api_key,
+            base_url=self.provider.base_url or None,
+            timeout=self.REQUEST_TIMEOUT,
+            max_retries=self.MAX_RETRIES,
+        )
 
     def _prepare_messages(self, messages: Sequence[ChatMessage], new_prompt: str) -> list[MessageParam]:
         """
-        Prepare message history for Anthropic API.
-        Args:
-            messages: Previous messages in the conversation
-            new_prompt: New user prompt to append
-        Returns:
-            List of formatted messages for the Anthropic API
+        Prepare message history for the Anthropic API.
         """
         message_params = [
             MessageParam(
@@ -54,7 +58,7 @@ class AnthropicProvider(LLMProviderBase):
             )
             for message in messages
         ]
-        # Add the new prompt
+        # Append the new prompt as the latest user message.
         message_params.append(MessageParam(role=MessageRole.USER.value, content=new_prompt))
         return message_params
 
@@ -67,28 +71,21 @@ class AnthropicProvider(LLMProviderBase):
         temperature: float,
         top_p: float,
         messages: Sequence[ChatMessage] | None = None,
+        session_id: UUID | None = None,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Anthropic Claude.
-        Args:
-            prompt: Input prompt text
-            model: Model name to use
-            messages: Optional previous conversation messages
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
-            top_p: Top-p sampling parameter
+
         Yields:
-            Tuple of (chunk text, is_final)
+            A tuple of (text chunk, is_final). When the stream is complete,
+            an empty string with is_final=True is yielded.
         """
         message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
-        client = AsyncAnthropic(
-            api_key=self.provider.api_key,
-            base_url=self.provider.base_url or None,
-            timeout=self.REQUEST_TIMEOUT,
-            max_retries=self.MAX_RETRIES,
-        )
+        cancel_key = f"sse:cancel:{session_id}" if session_id else None
+        sse_manager = await get_sse_manager()
+
         try:
-            async with client.messages.stream(
+            async with self._client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -97,10 +94,14 @@ class AnthropicProvider(LLMProviderBase):
                 system=system_context,
             ) as stream:
                 async for text in stream.text_stream:
-                    # Not final chunk
+                    if cancel_key and await sse_manager.redis.exists(cancel_key):
+                        logger.warning(f"Stream cancelled for session {session_id}")
+                        await stream.close()  # Close the stream explicitly via the SDK.
+                        break
+                    # Yield text chunks as they arrive.
                     yield (text, False)
 
-                # After stream is complete, get final message with usage info
+                # When the stream completes, retrieve usage information.
                 final_message = await stream.get_final_message()
                 self._last_usage = final_message.usage
 
@@ -127,17 +128,14 @@ class AnthropicProvider(LLMProviderBase):
         messages: Sequence[ChatMessage] | None = None,
     ) -> tuple[str, int, int] | None:
         """
-        Generate text using Anthropic Claude with improved error handling and retries.
+        Generate text using Anthropic Claude.
+
+        Returns:
+            A tuple of (generated text, input tokens, output tokens).
         """
         try:
             message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
-            client = AsyncAnthropic(
-                api_key=self.provider.api_key,
-                base_url=self.provider.base_url or None,
-                timeout=self.REQUEST_TIMEOUT,
-                max_retries=self.MAX_RETRIES,
-            )
-            response = await client.messages.create(
+            response = await self._client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -165,27 +163,31 @@ class AnthropicProvider(LLMProviderBase):
 
     def _handle_api_error(self, error: APIError) -> None:
         """
-        Handle Anthropic API errors and raise appropriate provider exceptions.
+        Handle Anthropic API errors and raise the corresponding provider exceptions.
+        Exception chaining (using 'from error') is used to preserve the original traceback.
         """
         if isinstance(error, APIConnectionError):
             logger.exception("Anthropic API connection error during generation")
             raise ProviderConnectionError(
                 provider=self.provider_type,
                 error=str(error),
-            )
+            ) from error
+
         elif isinstance(error, RateLimitError):
             logger.exception("Anthropic API rate limit exceeded during generation")
             raise ProviderRateLimitError(
                 provider=self.provider_type,
                 error=str(error),
-            )
+            ) from error
+
         elif isinstance(error, AuthenticationError):
             logger.exception("Anthropic authentication error during generation")
             raise ProviderConfigurationError(
                 provider=self.provider_type,
                 message="Invalid API credentials",
                 error=str(error),
-            )
+            ) from error
+
         elif isinstance(error, APIStatusError):
             logger.exception("Anthropic API status error during generation")
             raise ProviderAPIError(
@@ -193,21 +195,15 @@ class AnthropicProvider(LLMProviderBase):
                 status_code=error.status_code,
                 message=error.message,
                 error=str(error),
-            )
+            ) from error
+
         else:
             logger.exception("Anthropic API error during generation")
             raise ProviderAPIError(
                 provider=self.provider_type,
                 status_code=getattr(error, "status_code", 500),
                 error=str(error),
-            )
-
-    @classmethod
-    def get_default_models(cls) -> list[str]:
-        """
-        Get list of default supported models.
-        """
-        return ClaudeModelName.default_models()
+            ) from error
 
     def get_token_usage(self) -> tuple[int, int]:
         """
@@ -221,5 +217,5 @@ class AnthropicProvider(LLMProviderBase):
         return (0, 0)
 
 
-# Register the Anthropic provider with the factory
+# Register the Anthropic provider with the factory.
 ProviderFactory.register(provider_type=ProviderType.ANTHROPIC, provider_class=AnthropicProvider)

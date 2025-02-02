@@ -1,4 +1,5 @@
 from typing import AsyncGenerator, Sequence
+from uuid import UUID
 
 from loguru import logger
 from openai import (
@@ -9,12 +10,12 @@ from openai import (
     AuthenticationError,
     RateLimitError,
 )
-from openai.types.chat import ChatCompletion
 
 from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
+from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
-from app.providers.constants import OpenAIModelName, ProviderType
+from app.providers.constants import ProviderType
 from app.providers.exceptions import (
     ProviderAPIError,
     ProviderConfigurationError,
@@ -58,15 +59,14 @@ class OpenAIProvider(LLMProviderBase):
         # Add system message if provided
         if system_context:
             formatted_messages.append({"role": "system", "content": system_context})
-
         # Add conversation history
-        for message in messages:
-            formatted_messages.append(
-                {
-                    "role": "assistant" if message.role == MessageRole.ASSISTANT else "user",
-                    "content": message.content,
-                }
-            )
+        formatted_messages.extend(
+            {
+                "role": "assistant" if message.role == MessageRole.ASSISTANT else "user",
+                "content": message.content,
+            }
+            for message in messages
+        )
 
         # Add the new prompt
         formatted_messages.append({"role": "user", "content": new_prompt})
@@ -81,20 +81,20 @@ class OpenAIProvider(LLMProviderBase):
             raise ProviderConnectionError(
                 provider=self.provider_type,
                 error=str(error),
-            )
+            ) from error
         elif isinstance(error, RateLimitError):
             logger.exception("OpenAI API rate limit exceeded during generation")
             raise ProviderRateLimitError(
                 provider=self.provider_type,
                 error=str(error),
-            )
+            ) from error
         elif isinstance(error, AuthenticationError):
             logger.exception("OpenAI authentication error during generation")
             raise ProviderConfigurationError(
                 provider=self.provider_type,
                 message="Invalid API credentials",
                 error=str(error),
-            )
+            ) from error
         elif isinstance(error, APIStatusError):
             logger.exception("OpenAI API status error during generation")
             raise ProviderAPIError(
@@ -102,24 +102,14 @@ class OpenAIProvider(LLMProviderBase):
                 status_code=error.status_code,
                 message=error.message,
                 error=str(error),
-            )
+            ) from error
         elif isinstance(error, APIError):
             logger.exception("OpenAI API error during generation")
             raise ProviderAPIError(
                 provider=self.provider_type,
                 status_code=getattr(error, "status_code", 500),
                 error=str(error),
-            )
-
-    def _get_usage_from_response(self, response: ChatCompletion) -> tuple[int, int]:
-        """
-        Extract token usage from OpenAI response.
-        """
-        usage = response.usage
-        return (
-            usage.prompt_tokens,
-            usage.completion_tokens,
-        )
+            ) from error
 
     async def generate_stream(
         self,
@@ -130,16 +120,23 @@ class OpenAIProvider(LLMProviderBase):
         temperature: float,
         top_p: float,
         messages: Sequence[ChatMessage] | None = None,
+        session_id: UUID | None = None,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using OpenAI.
         Args:
-            prompt: Input prompt text
-            model: Model name to use
-            system_context: System context/instructions
-            messages: Optional previous conversation messages
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
+            prompt: The input prompt text.
+            model: The name of the model to use for generation.
+            system_context: The system context to use for generation.
+            max_tokens: Maximum number of tokens to generate.
+            temperature: Temperature parameter for generation.
+                Higher values make output more random and creative; lower values
+                make output more focused and deterministic.
+            top_p: Top-p parameter for generation.
+                Higher values make output more random and creative; lower values
+                make output more focused and deterministic.
+            messages: Optional previous conversation messages.
+            session_id: Optional session ID for stopping stream.
         Yields:
             Tuple of (chunk text, is_final)
         """
@@ -148,33 +145,38 @@ class OpenAIProvider(LLMProviderBase):
             new_prompt=prompt,
             system_context=system_context,
         )
+        cancel_key = f"sse:cancel:{session_id}" if session_id else None
+        sse_manager = await get_sse_manager()
 
         try:
             stream = await self._client.chat.completions.create(
                 model=model,
                 messages=formatted_messages,
+                # TODO: In case of o1, o3 models, make max_tokens, temperature, top_p optional
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
                 stream=True,
+                stream_options={"include_usage": True},
             )
 
             async for chunk in stream:
+                if cancel_key and await sse_manager.redis.exists(cancel_key):
+                    logger.warning(f"Stream cancelled for session {session_id}")
+                    await stream.close()  # Explicitly close the stream from the SDK
+                    break
+
+                # Check if this is the final chunk containing usage info.
+                if chunk.usage is not None:
+                    usage = chunk.usage
+                    # Extract prompt_tokens and completion_tokens
+                    self._last_usage = (usage.prompt_tokens, usage.completion_tokens)
+                    yield ("", True)
+                    break  # End of stream
+
+                # Otherwise, yield the content if available.
                 if chunk.choices and (content := chunk.choices[0].delta.content):
                     yield (content, False)
-
-                # On last chunk, get usage metrics
-                if chunk.choices and chunk.choices[0].finish_reason:
-                    # Make a non-streaming call to get usage metrics
-                    final_response = await self._client.chat.completions.create(
-                        model=model,
-                        messages=formatted_messages,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                    )
-                    self._last_usage = self._get_usage_from_response(final_response)
-
-                    yield ("", True)
 
         except (
             APIConnectionError,
@@ -223,7 +225,10 @@ class OpenAIProvider(LLMProviderBase):
             )
 
             generated_text = response.choices[0].message.content or ""
-            self._last_usage = self._get_usage_from_response(response)
+            self._last_usage = (
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+            )
 
             return (
                 generated_text,
@@ -239,13 +244,6 @@ class OpenAIProvider(LLMProviderBase):
             APIError,
         ) as error:
             self._handle_api_error(error)
-
-    @classmethod
-    def get_default_models(cls) -> list[str]:
-        """
-        Get list of default supported models.
-        """
-        return OpenAIModelName.default_models()
 
     def get_token_usage(self) -> tuple[int, int]:
         """

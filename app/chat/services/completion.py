@@ -4,7 +4,7 @@ from uuid import UUID
 from langfuse.decorators import langfuse_context, observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.constants import MessageRole, MessageStatus, error_messages, system_defaults
+from app.chat.constants import MessageRole, MessageStatus, error_messages
 from app.chat.crud import crud_message
 from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
@@ -15,7 +15,6 @@ from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
-from app.providers.clients.utils import get_token_counter
 from app.providers.exceptions.client import ProviderAPIError, ProviderConnectionError, ProviderRateLimitError
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMModel, LLMProvider
@@ -82,15 +81,6 @@ class ChatCompletionService:
         Create a new user message with token counting and cost calculation.
         """
 
-        # Get token counter for provider/model
-        token_counter = get_token_counter(provider=provider, model=model)
-
-        # Count input tokens
-        input_tokens = await token_counter.count_tokens(content) if token_counter else 0
-
-        # Calculate cost
-        input_cost = input_tokens * model.input_cost_per_token
-
         return await crud_message.create_with_session(
             db=self.db,
             session_id=session_id,
@@ -99,12 +89,6 @@ class ChatCompletionService:
                 role=MessageRole.USER,
                 status=MessageStatus.COMPLETED,
                 parent_id=parent_id,
-                usage=MessageUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=0,
-                    input_cost=input_cost,
-                    output_cost=0,
-                ),
             ),
         )
 
@@ -210,11 +194,11 @@ class ChatCompletionService:
             "top_p": request_params.top_p or model.top_p,
         }
 
-    def get_system_context(self, chat_session: ChatSession) -> str:
+    def get_system_context(self, chat_session: ChatSession) -> str | None:
         """
         Get system context with fallback to default.
         """
-        return chat_session.system_context or system_defaults.CONTEXT
+        return chat_session.system_context
 
     async def handle_provider_error(self, error: Exception) -> str:
         """
