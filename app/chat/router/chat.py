@@ -96,6 +96,38 @@ async def stream_completion(
     )
 
 
+@router.post(
+    "/complete/{session_id}/stop",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Session not found",
+            "model": ErrorResponseModel,
+        },
+    },
+)
+async def stop_completion(
+    session_id: UUID,
+    sse_manager: SSEConnectionManager = Depends(get_sse_manager),
+) -> None:
+    """
+    ## Stop Chat Completion Stream
+
+    Stops an ongoing streaming completion for the specified session.
+    Also cancels any ongoing API calls to the provider.
+
+    ### Parameters
+    - **session_id**: UUID of the chat session to stop streaming
+
+    ### Returns
+    No content on successful stop
+
+    ### Raises
+    - **404**: Session not found
+    """
+    await sse_manager.stop_stream(session_id=session_id)
+
+
 # For the non streaming completion
 @router.post(
     "/complete/{session_id}",

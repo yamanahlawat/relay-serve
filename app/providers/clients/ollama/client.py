@@ -6,6 +6,7 @@ from ollama import AsyncClient, Message, ResponseError
 
 from app.chat.constants import MessageRole
 from app.chat.models import ChatMessage
+from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import (
@@ -25,17 +26,17 @@ class OllamaProvider(LLMProviderBase):
 
     def __init__(self, provider: LLMProvider) -> None:
         super().__init__(provider)
+        # Instantiate and cache the AsyncClient for reuse.
         self._client = AsyncClient(host=self.provider.base_url)
-        self._last_usage = None
-        self._available_models = None
+        self._last_usage: tuple[int, int] | None = None
 
     def _get_usage_metrics(self, response: dict) -> dict:
         """
-        Extract usage metrics from Ollama response.
+        Extract usage metrics from the Ollama response.
         Args:
-            response: Raw response from Ollama API
+            response: Raw response from the Ollama API.
         Returns:
-            Dict containing usage metrics
+            A dictionary containing usage metrics.
         """
         return {
             "prompt_tokens": response.get("prompt_eval_count", 0),
@@ -49,26 +50,26 @@ class OllamaProvider(LLMProviderBase):
 
     def _prepare_messages(self, messages: Sequence[ChatMessage], new_prompt: str, system_context: str) -> list[Message]:
         """
-        Prepare message history for Ollama API.
+        Prepare message history for the Ollama API.
         Args:
-            messages: Previous messages in the conversation
-            new_prompt: New user prompt to append
+            messages: Previous messages in the conversation.
+            new_prompt: New user prompt to append.
+            system_context: System context to send as a system message.
         Returns:
-            List of formatted messages for the Ollama API
+            A list of formatted messages for the Ollama API.
         """
         formatted_messages = [Message(role="system", content=system_context)]
         for message in messages:
-            formatted_messages.append(
-                Message(role="assistant" if message.role == MessageRole.ASSISTANT else "user", content=message.content)
-            )
-
-        # Add the new user prompt
+            role = "assistant" if message.role == MessageRole.ASSISTANT else "user"
+            formatted_messages.append(Message(role=role, content=message.content))
+        # Append the new prompt as a user message.
         formatted_messages.append(Message(role="user", content=new_prompt))
         return formatted_messages
 
     async def _handle_api_error(self, error: Exception) -> None:
         """
-        Handle Ollama API errors and raise appropriate provider exceptions.
+        Handle Ollama API errors and raise the appropriate provider exceptions.
+        Uses exception chaining to preserve the original traceback.
         """
         if isinstance(error, ResponseError):
             if error.status_code == 404:
@@ -77,47 +78,47 @@ class OllamaProvider(LLMProviderBase):
                     provider=self.provider_type,
                     message="Model not found or not loaded",
                     error=str(error),
-                )
+                ) from error
             elif error.status_code == 429:
                 logger.exception("Ollama API rate limit exceeded")
                 raise ProviderRateLimitError(
                     provider=self.provider_type,
                     error=str(error),
-                )
+                ) from error
             elif error.status_code >= 500:
                 logger.exception("Ollama server error")
                 raise ProviderConnectionError(
                     provider=self.provider_type,
                     message="Ollama server error",
                     error=str(error),
-                )
+                ) from error
             else:
                 logger.exception("Ollama API error")
                 raise ProviderAPIError(
                     provider=self.provider_type,
                     status_code=error.status_code,
                     error=error.error,
-                )
+                ) from error
         elif isinstance(error, ConnectionError):
             logger.exception("Ollama connection error")
             raise ProviderConnectionError(
                 provider=self.provider_type,
                 error=str(error),
-            )
+            ) from error
         elif isinstance(error, TimeoutError):
             logger.exception("Ollama request timed out")
             raise ProviderConnectionError(
                 provider=self.provider_type,
                 message="Request timed out",
                 error=str(error),
-            )
+            ) from error
         else:
             logger.exception("Unexpected Ollama error")
             raise ProviderAPIError(
                 provider=self.provider_type,
                 status_code=500,
                 error=str(error),
-            )
+            ) from error
 
     async def generate_stream(
         self,
@@ -128,45 +129,45 @@ class OllamaProvider(LLMProviderBase):
         temperature: float,
         top_p: float,
         messages: Sequence[ChatMessage] | None = None,
+        session_id: str | None = None,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Ollama.
-        Args:
-            prompt: Input prompt text
-            model: Model name to use
-            messages: Optional previous conversation messages
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
         Yields:
-            Tuple of (chunk text, is_final)
+            A tuple of (text chunk, is_final). An empty string with is_final=True indicates completion.
         """
         formatted_messages = self._prepare_messages(
             messages=messages or [], new_prompt=prompt, system_context=system_context
         )
-        final_chunk = None
+        cancel_key = f"sse:cancel:{session_id}" if session_id else None
+        sse_manager = await get_sse_manager()
+        final_chunk = None  # To store the final chunk containing usage metrics.
 
+        options = {
+            "num_predict": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
         try:
-            total_generated = ""
             stream = self._client.chat(
                 model=model,
                 messages=formatted_messages,
                 stream=True,
-                options={
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                },
+                options=options,
             )
             async for chunk in await stream:
-                # Store final chunk for metrics
+                if cancel_key and await sse_manager.redis.exists(cancel_key):
+                    logger.warning(f"Stream cancelled for session {session_id}")
+                    stream.close()  # Explicitly close the stream from the SDK
+                    break
+
+                # Store the final chunk for usage metrics.
                 if chunk.get("done", False):
                     final_chunk = chunk
-
-                if content := chunk["message"].get("content", ""):
-                    total_generated += content
+                if content := chunk.get("message", {}).get("content", ""):
                     yield (content, False)
 
-            if final_chunk:
+            if final_chunk is not None:
                 # Get usage metrics from final chunk
                 metrics = self._get_usage_metrics(response=final_chunk)
                 self._last_usage = (metrics["prompt_tokens"], metrics["completion_tokens"])
@@ -188,68 +189,52 @@ class OllamaProvider(LLMProviderBase):
     ) -> tuple[str, int, int] | None:
         """
         Generate text using Ollama.
-        Args:
-            prompt: Input prompt text
-            model: Model name to use
-            messages: Optional previous conversation messages
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
         Returns:
-            Tuple of (generated text, input tokens, output tokens)
+            A tuple containing (generated text, input tokens, output tokens).
         """
         formatted_messages = self._prepare_messages(
             messages=messages or [], new_prompt=prompt, system_context=system_context
         )
-
+        options = {
+            "num_predict": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
         try:
             response = await self._client.chat(
                 model=model,
                 messages=formatted_messages,
-                options={
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                },
+                options=options,
             )
-
-            generated_text = response["message"]["content"]
+            generated_text = response.get("message", {}).get("content", "")
             metrics = self._get_usage_metrics(response=response)
-
             # Store usage metrics
             self._last_usage = (metrics["prompt_tokens"], metrics["completion_tokens"])
-
             return (
                 generated_text,
                 metrics["prompt_tokens"],
                 metrics["completion_tokens"],
             )
-
         except Exception as error:
             await self._handle_api_error(error)
 
     def get_token_usage(self) -> tuple[int, int]:
         """
-        Get the token usage from the last operation.
-        Returns (prompt_tokens, completion_tokens)
-        """
-        return self._last_usage if self._last_usage else (0, 0)
-
-    async def _fetch_available_models(self) -> list[str]:
-        """
-        Fetch available models from Ollama API.
+        Get token usage from the last operation.
         Returns:
-            List of model names available in the Ollama instance
+            A tuple (prompt_tokens, completion_tokens).
+        """
+        return self._last_usage if self._last_usage is not None else (0, 0)
+
+    async def list_existing_models(self) -> list[str]:
+        """
+        Fetch available models from the Ollama API.
+        Returns:
+            A list of model names available in the Ollama instance.
         """
         response = await self._client.list()
-        return [model["name"] for model in response["models"]]
-
-    @classmethod
-    def get_default_models(cls) -> list[str]:
-        """
-        Get list of default supported models.
-        """
-        return cls._fetch_available_models()
+        return [model["name"] for model in response.get("models", [])]
 
 
-# Register the Ollama provider with the factory
+# Register the Ollama provider with the factory.
 ProviderFactory.register(provider_type=ProviderType.OLLAMA, provider_class=OllamaProvider)
