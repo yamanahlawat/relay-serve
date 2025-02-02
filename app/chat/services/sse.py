@@ -43,7 +43,17 @@ class SSEConnectionManager:
         Cleanup session-specific keys when the connection is terminated.
         """
         session_key = f"sse:session:{session_id}"
+        cancel_key = f"sse:cancel:{session_id}"
         await self.redis.delete(session_key)
+        await self.redis.delete(cancel_key)  # Remove cancel flag
+
+    async def stop_stream(self, session_id: UUID) -> None:
+        """
+        Stop an ongoing streaming session by setting a cancellation flag.
+        """
+        cancel_key = f"sse:cancel:{session_id}"
+        await self.redis.set(cancel_key, "1", ex=10)  # Set cancel flag for 10 sec
+        logger.info(f"Stop signal sent for session {session_id}")
 
     async def stream_generator(
         self,
@@ -56,6 +66,7 @@ class SSEConnectionManager:
         """
         session_key = f"sse:session:{session_id}"
         pubsub_channel = f"sse:stream:{session_id}"
+        cancel_key = f"sse:cancel:{session_id}"
 
         try:
             logger.info(f"Starting stream for session {session_id}")
@@ -64,6 +75,9 @@ class SSEConnectionManager:
 
             # Publish messages to the channel as they are generated
             async for chunk in generator:
+                if await self.redis.exists(cancel_key):  # Check for stop signal
+                    logger.warning(f"Stream cancelled for session {session_id}")
+                    break
                 if not await self.redis.exists(session_key):
                     break
                 await self.redis.publish(pubsub_channel, chunk)

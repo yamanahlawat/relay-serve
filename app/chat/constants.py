@@ -44,21 +44,6 @@ class LLMDefaults(BaseModel):
     MAX_TOKENS: int = Field(default=4096, gt=0)
 
 
-class SystemDefaults(BaseModel):
-    """
-    Default system context for chat sessions
-    """
-
-    CONTEXT: str = Field(
-        default=(
-            "You are a helpful AI assistant. "
-            "You provide accurate, informative, and engaging responses. "
-            "If you're unsure about something, you'll admit it rather than making assumptions. "
-            "You aim to be concise while ensuring all relevant information is included."
-        )
-    )
-
-
 class ErrorMessages(BaseModel):
     """
     User-friendly error messages for chat service
@@ -75,5 +60,4 @@ class ErrorMessages(BaseModel):
 
 # Initialize defaults
 llm_defaults = LLMDefaults()
-system_defaults = SystemDefaults()
 error_messages = ErrorMessages()
