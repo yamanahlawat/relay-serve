@@ -11,8 +11,11 @@ from app.chat.exceptions.message import (
     ParentMessageNotFoundException,
 )
 from app.chat.models import ChatMessage
-from app.chat.schemas import MessageCreate, MessageUpdate
+from app.chat.schemas import MessageUpdate
+from app.chat.schemas.message import MessageCreate, MessageIn
 from app.chat.services.session import ChatSessionService
+from app.core.config import settings
+from app.storages.local import LocalStorage
 
 
 class ChatMessageService:
@@ -20,7 +23,7 @@ class ChatMessageService:
         self.db = db
         self.session_service = ChatSessionService(db=self.db)
 
-    async def create_message(self, message_in: MessageCreate, session_id: UUID) -> ChatMessage:
+    async def create_message(self, message_in: MessageIn, session_id: UUID) -> ChatMessage:
         session = await self.session_service.get_session(session_id=session_id)
         # Verify parent message if provided
         if message_in.parent_id:
@@ -30,7 +33,25 @@ class ChatMessageService:
             if parent.session_id != session.id:
                 raise InvalidParentMessageSessionException()
 
-        message = await crud_message.create_with_session(db=self.db, session_id=session_id, obj_in=message_in)
+        attachment_data = (
+            [
+                {
+                    "filename": attachment.filename,
+                    "content_type": attachment.content_type,
+                    "size": attachment.size,
+                }
+                for attachment in message_in.attachments
+            ]
+            if message_in.attachments
+            else []
+        )
+        message_create = MessageCreate(**message_in.model_dump(exclude={"attachments"}), attachments=attachment_data)
+        message = await crud_message.create_with_session(db=self.db, session_id=session_id, obj_in=message_create)
+        if message_in.attachments:
+            storage = LocalStorage(base_path=settings.FILE_STORAGE_PATH)
+            for attachment in message_in.attachments:
+                folder_path = f"{session_id}/{message.id}"
+                await storage.save_file_to_folder(file=attachment, folder=folder_path)
         return message
 
     async def list_messages(self, session_id: UUID, offset: int = 0, limit: int = 10) -> Sequence[ChatMessage]:

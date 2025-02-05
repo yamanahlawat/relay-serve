@@ -16,6 +16,8 @@ dependencies = [
     "sentry-sdk[fastapi,sqlalchemy]>=2.20.0",
     "langfuse>=2.58.1",
     "redis[hiredis]>=5.2.1",
+    "aiofiles>=24.1.0",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

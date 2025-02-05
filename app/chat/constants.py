@@ -13,6 +13,17 @@ class MessageRole(BaseEnum):
     ASSISTANT = "assistant"
 
 
+class AttachmentType(BaseEnum):
+    """
+    Enum for attachment types
+    """
+
+    IMAGE = "image"
+    VIDEO = "video"
+    DOCUMENT = "document"
+    AUDIO = "audio"
+
+
 class MessageStatus(BaseEnum):
     """
     Message processing status
