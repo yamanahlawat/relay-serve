@@ -2,9 +2,9 @@ from datetime import datetime
 from typing import AsyncGenerator, Sequence
 
 from loguru import logger
-from ollama import AsyncClient, Message, ResponseError
+from ollama import AsyncClient, Image, Message, ResponseError
 
-from app.chat.constants import MessageRole
+from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
@@ -48,7 +48,12 @@ class OllamaProvider(LLMProviderBase):
             "done_reason": response.get("done_reason"),
         }
 
-    def _prepare_messages(self, messages: Sequence[ChatMessage], new_prompt: str, system_context: str) -> list[Message]:
+    def _prepare_messages(
+        self,
+        messages: Sequence[ChatMessage],
+        current_message: ChatMessage,
+        system_context: str,
+    ) -> list[Message]:
         """
         Prepare message history for the Ollama API.
         Args:
@@ -63,7 +68,17 @@ class OllamaProvider(LLMProviderBase):
             role = "assistant" if message.role == MessageRole.ASSISTANT else "user"
             formatted_messages.append(Message(role=role, content=message.content))
         # Append the new prompt as a user message.
-        formatted_messages.append(Message(role="user", content=new_prompt))
+        message_images = []
+        for attachment in current_message.attachments:
+            if attachment.type == AttachmentType.IMAGE.value:
+                message_images.append(Image(value=attachment.storage_path))
+        formatted_messages.append(
+            Message(
+                role="user",
+                content=current_message.content,
+                images=message_images,
+            )
+        )
         return formatted_messages
 
     async def _handle_api_error(self, error: Exception) -> None:
@@ -122,7 +137,7 @@ class OllamaProvider(LLMProviderBase):
 
     async def generate_stream(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -137,7 +152,9 @@ class OllamaProvider(LLMProviderBase):
             A tuple of (text chunk, is_final). An empty string with is_final=True indicates completion.
         """
         formatted_messages = self._prepare_messages(
-            messages=messages or [], new_prompt=prompt, system_context=system_context
+            messages=messages or [],
+            current_message=current_message,
+            system_context=system_context,
         )
         cancel_key = f"sse:cancel:{session_id}" if session_id else None
         sse_manager = await get_sse_manager()
