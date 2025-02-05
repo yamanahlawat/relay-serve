@@ -40,8 +40,7 @@ class ChatMessageService:
             await attachment_service.create_attachments(
                 files=message_in.attachments, message_id=message.id, session_id=session_id
             )
-            await self.db.refresh(message, ["attachments"])
-
+        await self.db.refresh(message, ["attachments"])
         return message
 
     async def list_messages(self, session_id: UUID, offset: int = 0, limit: int = 10) -> Sequence[ChatMessage]:
