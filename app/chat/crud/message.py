@@ -25,8 +25,8 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         Returns:
             ChatMessage | None: Chat message with attachments if found, else None
         """
-        stmt = select(self.model).options(selectinload(self.model.attachments)).where(self.model.id == id)
-        result = await db.execute(stmt)
+        statement = select(self.model).options(selectinload(self.model.attachments)).where(self.model.id == id)
+        result = await db.execute(statement)
         return result.scalar_one_or_none()
 
     async def create_with_session(
@@ -112,7 +112,12 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         if exclude_message_id:
             conditions.append(self.model.id != exclude_message_id)
 
-        query = select(self.model).where(*conditions).order_by(self.model.created_at.asc())
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.attachments))
+            .where(*conditions)
+            .order_by(self.model.created_at.asc())
+        )
 
         result = await db.execute(query)
         return result.scalars().all()

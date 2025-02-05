@@ -57,9 +57,3 @@ class AttachmentService:
             attachment = await self.create_attachment(file=file, message_id=message_id, session_id=session_id)
             attachments.append(attachment)
         return attachments
-
-    def get_attachment_download_url(self, folder: str, original_filename: str) -> str:
-        """
-        Get an absolute download URL for an attachment.
-        """
-        return self.storage.get_absolute_url(folder, original_filename)

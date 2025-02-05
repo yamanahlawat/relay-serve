@@ -5,8 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.chat.constants import AttachmentType
-from app.core.config import settings
-from app.core.constants import StorageProvider
+from app.storages.utils import get_attachment_download_url
 
 
 class AttachmentBase(BaseModel):
@@ -65,13 +64,4 @@ class AttachmentRead(AttachmentBase):
         Constructs the absolute URL for this attachment.
         If using local storage, it builds the URL from settings.BASE_URL, settings.API_URL, and the stored path.
         """
-        if settings.STORAGE_PROVIDER == StorageProvider.LOCAL:
-            # Here, we assume storage_path is something like:
-            # "/uploads/8a540b73-.../ba194f98-da60-44a9-.../filename"
-            # The endpoint URL becomes:
-            # {BASE_URL}{API_URL}/v1/attachments/<folder>/<filename>
-            return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments{self.storage_path}"
-        elif settings.STORAGE_PROVIDER == StorageProvider.S3:
-            raise NotImplementedError("S3 URL generation not yet implemented")
-        else:
-            raise ValueError("Invalid storage provider configured")
+        return get_attachment_download_url(storage_path=self.storage_path)

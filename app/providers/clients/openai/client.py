@@ -11,7 +11,7 @@ from openai import (
     RateLimitError,
 )
 
-from app.chat.constants import MessageRole
+from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
@@ -24,6 +24,7 @@ from app.providers.exceptions import (
 )
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
+from app.storages.utils import encode_image_to_base64
 
 
 class OpenAIProvider(LLMProviderBase):
@@ -39,37 +40,63 @@ class OpenAIProvider(LLMProviderBase):
         )
         self._last_usage = None
 
+    def _format_message_content(self, message: ChatMessage, is_current: bool = False) -> list[dict]:
+        """
+        Format message content with any image attachments.
+        """
+        content = []
+
+        # Add text content
+        content.append({"type": "text", "text": message.content})
+
+        # Add any image attachments
+        if is_current and message.attachments:
+            for attachment in message.attachments:
+                if attachment.type == AttachmentType.IMAGE.value:
+                    base64_image = encode_image_to_base64(image_path=attachment.storage_path)
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        }
+                    )
+
+        return content
+
     def _prepare_messages(
         self,
         messages: Sequence[ChatMessage],
-        new_prompt: str,
+        current_message: ChatMessage,
         system_context: str,
     ) -> list[dict[str, str]]:
         """
         Prepare message history for OpenAI API.
         Args:
             messages: Previous messages in the conversation
-            new_prompt: New user prompt to append
+            current_message: Current message to generate completion for
             system_context: System context/instructions
         Returns:
             List of formatted messages for the OpenAI API
         """
+
         formatted_messages = []
 
-        # Add system message if provided
         if system_context:
             formatted_messages.append({"role": "system", "content": system_context})
-        # Add conversation history
-        formatted_messages.extend(
-            {
-                "role": "assistant" if message.role == MessageRole.ASSISTANT else "user",
-                "content": message.content,
-            }
-            for message in messages
-        )
 
-        # Add the new prompt
-        formatted_messages.append({"role": "user", "content": new_prompt})
+        # Format history messages
+        for message in messages:
+            message_content = self._format_message_content(message=message, is_current=False)
+            formatted_messages.append(
+                {"role": "assistant" if message.role == MessageRole.ASSISTANT else "user", "content": message_content}
+            )
+
+        # Add current message
+        current_content = self._format_message_content(message=current_message, is_current=True)
+        formatted_messages.append({"role": "user", "content": current_content})
+
         return formatted_messages
 
     def _handle_api_error(self, error: APIError) -> None:
@@ -113,7 +140,7 @@ class OpenAIProvider(LLMProviderBase):
 
     async def generate_stream(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -125,7 +152,7 @@ class OpenAIProvider(LLMProviderBase):
         """
         Generate streaming text using OpenAI.
         Args:
-            prompt: The input prompt text.
+            current_message: The current message to generate completion for.
             model: The name of the model to use for generation.
             system_context: The system context to use for generation.
             max_tokens: Maximum number of tokens to generate.
@@ -142,7 +169,7 @@ class OpenAIProvider(LLMProviderBase):
         """
         formatted_messages = self._prepare_messages(
             messages=messages or [],
-            new_prompt=prompt,
+            current_message=current_message,
             system_context=system_context,
         )
         cancel_key = f"sse:cancel:{session_id}" if session_id else None
@@ -189,7 +216,7 @@ class OpenAIProvider(LLMProviderBase):
 
     async def generate(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -211,7 +238,7 @@ class OpenAIProvider(LLMProviderBase):
         """
         formatted_messages = self._prepare_messages(
             messages=messages or [],
-            new_prompt=prompt,
+            current_message=current_message,
             system_context=system_context,
         )
 

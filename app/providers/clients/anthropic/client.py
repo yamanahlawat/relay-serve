@@ -9,10 +9,10 @@ from anthropic import (
     AuthenticationError,
     RateLimitError,
 )
-from anthropic.types import MessageParam
+from anthropic.types import ImageBlockParam, MessageParam
 from loguru import logger
 
-from app.chat.constants import MessageRole
+from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
 from app.providers.clients.base import LLMProviderBase
@@ -25,6 +25,7 @@ from app.providers.exceptions import (
 )
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
+from app.storages.utils import encode_image_to_base64
 
 
 class AnthropicProvider(LLMProviderBase):
@@ -47,24 +48,38 @@ class AnthropicProvider(LLMProviderBase):
             max_retries=self.MAX_RETRIES,
         )
 
-    def _prepare_messages(self, messages: Sequence[ChatMessage], new_prompt: str) -> list[MessageParam]:
+    def _prepare_messages(self, messages: Sequence[ChatMessage], current_message: ChatMessage) -> list[MessageParam]:
         """
         Prepare message history for the Anthropic API.
         """
-        message_params = [
-            MessageParam(
-                role=MessageRole.ASSISTANT.value if message.role == MessageRole.ASSISTANT else MessageRole.USER.value,
-                content=message.content,
+        formatted_messages = []
+
+        for message in messages:
+            formatted_messages.append(
+                MessageParam(
+                    role=MessageRole.ASSISTANT.value
+                    if message.role == MessageRole.ASSISTANT
+                    else MessageRole.USER.value,
+                    content=message.content,
+                )
             )
-            for message in messages
-        ]
+
+        if current_message.attachments:
+            for attachment in current_message.attachments:
+                if attachment.type == AttachmentType.IMAGE.value:
+                    base64_image = encode_image_to_base64(image_path=attachment.storage_path)
+                    image_block = ImageBlockParam(
+                        type="image",
+                        source={"type": "base64", "media_type": attachment.mime_type, "data": base64_image},
+                    )
+                    formatted_messages.append(image_block)
         # Append the new prompt as the latest user message.
-        message_params.append(MessageParam(role=MessageRole.USER.value, content=new_prompt))
-        return message_params
+        formatted_messages.append(MessageParam(role=MessageRole.USER.value, content=current_message.content))
+        return formatted_messages
 
     async def generate_stream(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -80,7 +95,7 @@ class AnthropicProvider(LLMProviderBase):
             A tuple of (text chunk, is_final). When the stream is complete,
             an empty string with is_final=True is yielded.
         """
-        message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
+        message_params = self._prepare_messages(messages=messages or [], current_message=current_message)
         cancel_key = f"sse:cancel:{session_id}" if session_id else None
         sse_manager = await get_sse_manager()
 
@@ -119,7 +134,7 @@ class AnthropicProvider(LLMProviderBase):
 
     async def generate(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -134,7 +149,7 @@ class AnthropicProvider(LLMProviderBase):
             A tuple of (generated text, input tokens, output tokens).
         """
         try:
-            message_params = self._prepare_messages(messages=messages or [], new_prompt=prompt)
+            message_params = self._prepare_messages(messages=messages or [], current_message=current_message)
             response = await self._client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
