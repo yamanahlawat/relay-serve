@@ -15,3 +15,12 @@ class Environment(BaseEnum):
 
     LOCAL = "local"
     PRODUCTION = "production"
+
+
+class StorageProvider(BaseEnum):
+    """
+    An enumeration representing the various storage providers that can be used.
+    """
+
+    LOCAL = "local"
+    S3 = "s3"

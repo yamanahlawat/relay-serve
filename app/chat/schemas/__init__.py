@@ -1,3 +1,4 @@
+from app.chat.schemas.attachment import AttachmentCreate, AttachmentRead, AttachmentUpdate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageCreate, MessageIn, MessageRead, MessageUpdate
@@ -19,4 +20,8 @@ __all__ = [
     "CompletionRequest",
     "CompletionResponse",
     "CompletionParams",
+    # Attachment schemas
+    "AttachmentCreate",
+    "AttachmentRead",
+    "AttachmentUpdate",
 ]

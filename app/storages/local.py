@@ -1,12 +1,21 @@
+# app/storages/local.py
 from pathlib import Path
+from typing import AsyncGenerator
 from uuid import uuid4
 
 import aiofiles
 from fastapi import UploadFile
 
+from app.core.config import settings
+from app.storages.interface import StorageBackend
 
-class LocalStorage:
+
+class LocalStorage(StorageBackend):
     def __init__(self, base_path: Path) -> None:
+        """
+        Initialize the local storage service with a base path.
+        Example: base_path = Path("/uploads")
+        """
         self.base_path = base_path
 
     def generate_file_path(self, *path_segments: str, original_filename: str | None) -> Path:
@@ -18,17 +27,13 @@ class LocalStorage:
 
     async def save_file(self, file: UploadFile, *path_segments: str) -> Path:
         """
-        Saves an UploadFile to the destination built from the given path segments.
-        Writes the file in chunks to avoid loading the entire file in memory.
+        Saves the file in chunks to avoid loading the entire file into memory.
         """
         destination = self.generate_file_path(*path_segments, original_filename=file.filename)
-        # Ensure the destination directory exists
         destination.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write the file in 1MB chunks
         async with aiofiles.open(destination, "wb") as out_file:
             while True:
-                chunk = await file.read(1024 * 1024)
+                chunk = await file.read(1024 * 1024)  # 1 MB chunks
                 if not chunk:
                     break
                 await out_file.write(chunk)
@@ -37,31 +42,58 @@ class LocalStorage:
 
     async def save_file_to_folder(self, file: UploadFile, folder: str) -> Path:
         """
-        Accepts a folder string (e.g., "session_id/message_id") and saves the file to that folder.
+        Saves a file using a folder path (e.g. 'session_id/message_id').
+        The folder string may include a duplicate base folder name (e.g. "uploads"); if so, it is removed.
         """
-        # Split the folder string into segments
         path_segments = folder.split("/")
         return await self.save_file(file, *path_segments)
 
     def find_file_path(self, folder: str, original_filename: str) -> Path | None:
         """
-        Searches the specified folder (e.g. "session_id/message_id") for a file whose name ends with
-        '_{original_filename}'. Returns the first matching file path, or None if not found.
+        Constructs the expected file path and checks if it exists.
+        If the folder string already contains the base folder name, remove it first.
         """
-        folder_path = self.base_path.joinpath(*folder.split("/"))
-        # The naming convention adds a UUID and an underscore before the original filename.
-        pattern = f"*_{original_filename}"
-        for file_path in folder_path.glob(pattern):
-            return file_path  # Return the first match
+        # Split the folder into parts
+        parts = folder.split("/")
+        # Remove the duplicate base folder if present (e.g. "uploads")
+        if parts and parts[0].lower() == self.base_path.name.lower():
+            parts = parts[1:]
+        folder_path = self.base_path.joinpath(*parts)
+        # Construct the full file path by joining folder_path with the original filename
+        file_path = folder_path.joinpath(original_filename)
+        if file_path.exists():
+            return file_path
         return None
 
-    def get_saved_file_path(self, folder: str, original_filename: str) -> Path:
+    async def get_file(self, folder: str, original_filename: str) -> AsyncGenerator[bytes, None]:
         """
-        Searches the specified folder (e.g. "session_id/message_id") for a file whose name ends with
-        '_{original_filename}' (the naming convention used when saving the file).
-        Returns the matching file path if found, otherwise raises a FileNotFoundError.
+        Retrieves a file from local storage as an asynchronous generator of file chunks.
+        This generator is intended for use by a router to stream the file to the client.
         """
         file_path = self.find_file_path(folder, original_filename)
-        if file_path is None:
-            raise FileNotFoundError(f"File ending with '_{original_filename}' not found in folder '{folder}'.")
-        return file_path
+        if not file_path or not file_path.exists():
+            raise FileNotFoundError(f"File '{original_filename}' not found in folder '{folder}'.")
+
+        async def file_iterator() -> AsyncGenerator[bytes, None]:
+            async with aiofiles.open(file_path, mode="rb") as f:
+                while True:
+                    chunk = await f.read(1024 * 1024)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return file_iterator()
+
+    def get_absolute_url(self, folder: str, original_filename: str) -> str:
+        """
+        Constructs an absolute URL that points to the endpoint serving this file.
+        It uses settings.BASE_URL, settings.API_URL, and assumes the attachments router is mounted at:
+          {BASE_URL}{API_URL}/v1/attachments
+        The folder string is used as provided.
+        """
+        file_path = self.find_file_path(folder=folder, original_filename=original_filename)
+        if not file_path:
+            raise FileNotFoundError(f"File '{original_filename}' not found in folder '{folder}'.")
+        filename = file_path.name
+        # Build URL: e.g. "http://localhost:8000/api/v1/attachments/<folder>/<filename>"
+        return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments/{folder}/{filename}"

@@ -11,11 +11,9 @@ from app.chat.exceptions.message import (
     ParentMessageNotFoundException,
 )
 from app.chat.models import ChatMessage
-from app.chat.schemas import MessageUpdate
-from app.chat.schemas.message import MessageCreate, MessageIn
+from app.chat.schemas import MessageCreate, MessageIn, MessageUpdate
+from app.chat.services.attachment import AttachmentService
 from app.chat.services.session import ChatSessionService
-from app.core.config import settings
-from app.storages.local import LocalStorage
 
 
 class ChatMessageService:
@@ -33,25 +31,17 @@ class ChatMessageService:
             if parent.session_id != session.id:
                 raise InvalidParentMessageSessionException()
 
-        attachment_data = (
-            [
-                {
-                    "filename": attachment.filename,
-                    "content_type": attachment.content_type,
-                    "size": attachment.size,
-                }
-                for attachment in message_in.attachments
-            ]
-            if message_in.attachments
-            else []
-        )
-        message_create = MessageCreate(**message_in.model_dump(exclude={"attachments"}), attachments=attachment_data)
+        message_create = MessageCreate(**message_in.model_dump(exclude={"attachments"}))
         message = await crud_message.create_with_session(db=self.db, session_id=session_id, obj_in=message_create)
+
+        # Process attachments if any
         if message_in.attachments:
-            storage = LocalStorage(base_path=settings.FILE_STORAGE_PATH)
-            for attachment in message_in.attachments:
-                folder_path = f"{session_id}/{message.id}"
-                await storage.save_file_to_folder(file=attachment, folder=folder_path)
+            attachment_service = AttachmentService(db=self.db)
+            await attachment_service.create_attachments(
+                files=message_in.attachments, message_id=message.id, session_id=session_id
+            )
+            await self.db.refresh(message, ["attachments"])
+
         return message
 
     async def list_messages(self, session_id: UUID, offset: int = 0, limit: int = 10) -> Sequence[ChatMessage]:
@@ -61,7 +51,7 @@ class ChatMessageService:
         return messages
 
     async def get_message(self, session_id: UUID, message_id: UUID) -> ChatMessage:
-        message = await crud_message.get(self.db, id=message_id)
+        message = await crud_message.get_with_attachments(self.db, id=message_id)
         session = await self.session_service.get_session(session_id=session_id)
         if not message:
             raise MessageNotFoundException(message_id=message_id)

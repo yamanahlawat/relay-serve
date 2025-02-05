@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.chat.router.attachment import router as attachment_router
 from app.chat.router.chat import router as chat_router
 from app.chat.router.message import router as message_router
 from app.chat.router.session import router as session_router
@@ -16,3 +17,4 @@ api_router.include_router(router=model_router)
 api_router.include_router(router=chat_router)
 api_router.include_router(router=session_router)
 api_router.include_router(router=message_router)
+api_router.include_router(router=attachment_router)
