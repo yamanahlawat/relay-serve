@@ -205,7 +205,7 @@ class ChatCompletionService:
         return error_messages.GENERAL_ERROR
 
     @observe(name="streaming")
-    async def generate_stream(
+    async def generate_chat_stream(
         self,
         chat_session: ChatSession,
         model: LLMModel,
@@ -218,7 +218,7 @@ class ChatCompletionService:
         """
         try:
             # Get the message
-            message = await self.message_service.get_message(
+            current_message = await self.message_service.get_message(
                 session_id=chat_session.id,
                 message_id=message_id,
             )
@@ -233,7 +233,7 @@ class ChatCompletionService:
             system_context = chat_session.system_context
 
             async for chunk, is_final in provider_client.generate_stream(
-                prompt=message.content,
+                current_message=current_message,
                 model=model.name,
                 system_context=system_context,
                 messages=history,
@@ -257,7 +257,7 @@ class ChatCompletionService:
                     self.update_langfuse_trace(
                         chat_session=chat_session,
                         assistant_message=assistant_message,
-                        user_message=message,
+                        user_message=current_message,
                         model=model.name,
                         usage={
                             "input": input_tokens,

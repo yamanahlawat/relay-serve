@@ -83,7 +83,7 @@ async def stream_completion(
     return StreamingResponse(
         sse_manager.stream_generator(
             session_id=session_id,
-            generator=chat_service.generate_stream(
+            generator=chat_service.generate_chat_stream(
                 chat_session=chat_session,
                 model=model,
                 provider_client=provider_client,
