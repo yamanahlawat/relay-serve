@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.chat.constants import MessageRole, MessageStatus
 from app.chat.models import ChatMessage
@@ -14,6 +15,19 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
     """
     CRUD operations for chat messages
     """
+
+    async def get_with_attachments(self, db: AsyncSession, id: UUID) -> ChatMessage | None:
+        """
+        Get a chat message by ID with attachments.
+        Args:
+            db (AsyncSession): Database session
+            id (UUID): ID of the message to fetch
+        Returns:
+            ChatMessage | None: Chat message with attachments if found, else None
+        """
+        stmt = select(self.model).options(selectinload(self.model.attachments)).where(self.model.id == id)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def create_with_session(
         self,
@@ -65,6 +79,7 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         """
         query = (
             select(self.model)
+            .options(selectinload(self.model.attachments))
             .where(self.model.session_id == session_id)
             .order_by(desc(self.model.created_at))
             .offset(offset)

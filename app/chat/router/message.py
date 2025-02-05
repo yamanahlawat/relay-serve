@@ -25,23 +25,28 @@ async def create_message(
     service: ChatMessageService = Depends(get_chat_message_service),
 ) -> ChatMessage:
     """
-    ## Create a New Chat Message
-    Creates a new message in the specified chat session.
+    Create a new message in the specified chat session with support for file attachments.
 
     ### Parameters
     - **session_id**: UUID of the chat session
-    - **content**: Message content
-    - **role**: Message role (user/assistant/system)
-    - **parent_id**: Optional parent message ID for threading
-    - **extra_data**: Optional additional data
+    - **Form Data**:
+        - **content**: Message content (required)
+        - **role**: Message role (user/assistant/system)
+        - **status**: Message status
+        - **parent_id**: Optional parent message ID for threading
+        - **usage**: JSON string of usage statistics
+        - **attachments**: List of file attachments
+        - **extra_data**: JSON string of additional metadata
 
     ### Returns
-    The created message
+    The created message with complete details
 
     ### Raises
     - **404**: Session not found
     - **404**: Parent message not found (if parent_id provided)
     - **400**: Invalid role for message
+    - **400**: Invalid form data format
+    - **413**: File too large
     """
     try:
         return await service.create_message(

@@ -7,6 +7,7 @@ from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from app.chat.constants import MessageRole, MessageStatus
+from app.chat.schemas import AttachmentRead
 from app.chat.schemas.common import ChatUsage
 
 
@@ -58,15 +59,26 @@ class MessageIn(MessageInBase):
         attachments: Annotated[list[UploadFile], File()] = [],
         extra_data: Annotated[str, Form()] = "{}",
     ) -> "MessageIn":
-        return MessageIn(
-            content=content,
-            role=role,
-            status=status,
-            parent_id=UUID(parent_id) if parent_id else None,
-            usage=MessageUsage(**json.loads(usage)),
-            attachments=attachments,
-            extra_data=json.loads(extra_data),
-        )
+        """Convert form data to MessageIn model"""
+        try:
+            # Parse parent_id to UUID if provided
+            parent_uuid = UUID(parent_id) if parent_id else None
+
+            # Parse JSON strings
+            usage_dict = json.loads(usage)
+            extra_data_dict = json.loads(extra_data)
+
+            return cls(
+                content=content,
+                role=role,
+                status=status,
+                parent_id=parent_uuid,
+                usage=MessageUsage(**usage_dict),
+                attachments=attachments,
+                extra_data=extra_data_dict,
+            )
+        except ValueError as e:
+            raise ValueError(f"Invalid UUID format: {e}")
 
 
 class MessageCreate(MessageInBase):
@@ -90,6 +102,7 @@ class MessageRead(BaseModel):
     parent_id: UUID | None = None
     created_at: datetime
     usage: ChatUsage | None = None
+    attachments: list[AttachmentRead] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
     extra_data: dict[str, Any]
