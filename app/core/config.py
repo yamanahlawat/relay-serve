@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import Field, HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.constants import Environment
+from app.core.constants import Environment, StorageProvider
 
 
 class DatabaseSettings(BaseSettings):
@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     Fetches the config from environment variables and .env file
     """
 
+    # Base URL for the application
+    BASE_URL: HttpUrl
+
     # the endpoint for api docs and all endpoints
     API_URL: str = "/api"
 
@@ -95,6 +98,7 @@ class Settings(BaseSettings):
     REDIS: RedisSettings
 
     # File Storage
+    STORAGE_PROVIDER: StorageProvider = StorageProvider.LOCAL
     FILE_STORAGE_PATH: Path = Path("/uploads")
 
     model_config = SettingsConfigDict(
