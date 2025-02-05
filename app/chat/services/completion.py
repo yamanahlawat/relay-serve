@@ -194,12 +194,6 @@ class ChatCompletionService:
             "top_p": request_params.top_p or model.top_p,
         }
 
-    def get_system_context(self, chat_session: ChatSession) -> str | None:
-        """
-        Get system context with fallback to default.
-        """
-        return chat_session.system_context
-
     async def handle_provider_error(self, error: Exception) -> str:
         """
         Handle provider errors and return user-friendly messages.
@@ -236,7 +230,7 @@ class ChatCompletionService:
             full_content = ""
 
             model_params = self.get_model_params(model=model, request_params=params)
-            system_context = self.get_system_context(chat_session=chat_session)
+            system_context = chat_session.system_context
 
             async for chunk, is_final in provider_client.generate_stream(
                 prompt=message.content,
@@ -300,7 +294,7 @@ class ChatCompletionService:
                 current_message_id=user_message.id,
             )
             model_params = self.get_model_params(model=model, request_params=request.model_params)
-            system_context = self.get_system_context(chat_session=chat_session)
+            system_context = chat_session.system_context
 
             # Generate response with history
             content, input_tokens, output_tokens = await provider_client.generate(

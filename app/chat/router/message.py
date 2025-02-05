@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Annotated, Sequence
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +11,8 @@ from app.chat.exceptions import (
     ParentMessageNotFoundException,
 )
 from app.chat.models import ChatMessage
-from app.chat.schemas import MessageCreate, MessageRead, MessageUpdate
+from app.chat.schemas import MessageRead, MessageUpdate
+from app.chat.schemas.message import MessageIn
 from app.chat.services import ChatMessageService
 
 router = APIRouter(prefix="/messages", tags=["Chat Messages"])
@@ -20,7 +21,7 @@ router = APIRouter(prefix="/messages", tags=["Chat Messages"])
 @router.post("/{session_id}/", response_model=MessageRead, status_code=status.HTTP_201_CREATED)
 async def create_message(
     session_id: UUID,
-    message_in: MessageCreate,
+    message_in: Annotated[MessageIn, Depends(MessageIn.as_form)],
     service: ChatMessageService = Depends(get_chat_message_service),
 ) -> ChatMessage:
     """

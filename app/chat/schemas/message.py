@@ -1,7 +1,9 @@
+import json
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
+from fastapi import File, Form, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from app.chat.constants import MessageRole, MessageStatus
@@ -19,9 +21,9 @@ class MessageUsage(BaseModel):
     output_cost: float = Field(default=0.0, ge=0.0, le=1000.0)
 
 
-class MessageCreate(BaseModel):
+class MessageInBase(BaseModel):
     """
-    Schema for creating a new message
+    Base schema for creating a new message
     """
 
     content: str = Field(min_length=1)
@@ -36,6 +38,43 @@ class MessageCreate(BaseModel):
         if len(v.strip()) == 0:
             raise ValueError("Content cannot be empty or just whitespace")
         return v.strip()
+
+
+class MessageIn(MessageInBase):
+    """
+    Schema for creating a new message from API
+    """
+
+    attachments: list[UploadFile] = Form(default_factory=list)
+
+    @classmethod
+    def as_form(
+        cls,
+        content: Annotated[str, Form()],
+        role: Annotated[MessageRole, Form()] = MessageRole.USER,
+        status: Annotated[MessageStatus, Form()] = MessageStatus.PENDING,
+        parent_id: Annotated[str | None, Form()] = None,
+        usage: Annotated[str, Form()] = "{}",
+        attachments: Annotated[list[UploadFile], File()] = [],
+        extra_data: Annotated[str, Form()] = "{}",
+    ) -> "MessageIn":
+        return MessageIn(
+            content=content,
+            role=role,
+            status=status,
+            parent_id=UUID(parent_id) if parent_id else None,
+            usage=MessageUsage(**json.loads(usage)),
+            attachments=attachments,
+            extra_data=json.loads(extra_data),
+        )
+
+
+class MessageCreate(MessageInBase):
+    """
+    Schema for creating a new message
+    """
+
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MessageRead(BaseModel):

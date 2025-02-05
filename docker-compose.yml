@@ -10,6 +10,7 @@ services:
     entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
       - ./:/src
+      - uploads:/uploads
     ports:
       - ${RELAY_PORT:-8000}:8000
     depends_on:
@@ -109,6 +110,7 @@ volumes:
   relay_db:
   cache_data:
   redis_insight_db:
+  uploads:
   langfuse_db:
 
 networks:

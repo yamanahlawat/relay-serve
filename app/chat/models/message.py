@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, remote
 
 from app.chat.constants import MessageRole, MessageStatus
+from app.chat.models.attachment import Attachment
 from app.database.base_class import TimeStampedBase
 
 if TYPE_CHECKING:
@@ -34,6 +35,9 @@ class ChatMessage(TimeStampedBase):
 
     # Message threading
     parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+
+    # Attachments
+    attachments: Mapped[list[Attachment]] = relationship(back_populates="message", cascade="all, delete-orphan")
 
     # Error tracking
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
