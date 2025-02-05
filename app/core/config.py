@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -92,6 +93,9 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS: RedisSettings
+
+    # File Storage
+    FILE_STORAGE_PATH: Path = Path("/uploads")
 
     model_config = SettingsConfigDict(
         env_file=".env",
