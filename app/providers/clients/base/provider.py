@@ -19,7 +19,7 @@ class LLMProviderBase(ABC):
     @abstractmethod
     async def generate(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -31,7 +31,7 @@ class LLMProviderBase(ABC):
         """
         Generate text using the provider.
         Args:
-            prompt: The input prompt text.
+            current_message: The current message to generate completion for.
             model: The name of the model to use for generation.
             system_context: The system context to use for generation.
             max_tokens: Maximum number of tokens to generate.
@@ -51,7 +51,7 @@ class LLMProviderBase(ABC):
     @abstractmethod
     async def generate_stream(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         max_tokens: int,
         temperature: float,
@@ -59,7 +59,7 @@ class LLMProviderBase(ABC):
         """
         Generate text using the provider in a streaming manner.
         Args:
-            prompt: The input prompt text.
+            current_message: The current message to generate completion for.
             model: The name of the model to use for generation.
             max_tokens: Maximum number of tokens to generate.
             temperature: Temperature parameter for generation.
