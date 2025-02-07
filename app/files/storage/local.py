@@ -7,7 +7,7 @@ import aiofiles
 from fastapi import UploadFile
 
 from app.core.config import settings
-from app.storages.interface import StorageBackend
+from app.files.storage.interface import StorageBackend
 
 
 class LocalStorage(StorageBackend):

@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.chat.constants import AttachmentType
-from app.storages.utils import get_attachment_download_url
+from app.files.storage.utils import get_attachment_download_url
 
 
 class AttachmentBase(BaseModel):

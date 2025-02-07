@@ -10,25 +10,27 @@ dependencies = [
     "fastapi[standard]>=0.115.8",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.7.1",
-    "sqlalchemy>=2.0.37",
+    "sqlalchemy>=2.0.38",
     "greenlet>=3.1.1",
     "loguru>=0.7.3",
     "sentry-sdk[fastapi,sqlalchemy]>=2.20.0",
-    "langfuse>=2.58.1",
+    "langfuse>=2.59.1",
     "redis[hiredis]>=5.2.1",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
+    "pillow>=11.1.0",
+    "pybase64>=1.4.0",
 ]
 
 [dependency-groups]
 providers = [
     "anthropic>=0.45.2",
     "ollama>=0.4.7",
-    "openai>=1.61.0",
+    "openai>=1.61.1",
 ]
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.1.0",
-    "ruff>=0.9.4",
+    "ruff>=0.9.5",
     "tomli-w>=1.2.0",
 ]

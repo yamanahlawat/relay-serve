@@ -9,12 +9,13 @@ from anthropic import (
     AuthenticationError,
     RateLimitError,
 )
-from anthropic.types import ImageBlockParam, MessageParam
+from anthropic.types import ImageBlockParam, MessageParam, TextBlockParam
 from loguru import logger
 
 from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
+from app.files.image.processor import ImageProcessor
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import (
@@ -25,7 +26,6 @@ from app.providers.exceptions import (
 )
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
-from app.storages.utils import encode_image_to_base64
 
 
 class AnthropicProvider(LLMProviderBase):
@@ -64,17 +64,19 @@ class AnthropicProvider(LLMProviderBase):
                 )
             )
 
+        attachments = []
         if current_message.attachments:
             for attachment in current_message.attachments:
                 if attachment.type == AttachmentType.IMAGE.value:
-                    base64_image = encode_image_to_base64(image_path=attachment.storage_path)
+                    base64_image = ImageProcessor.encode_image_to_base64(image_path=attachment.storage_path)
                     image_block = ImageBlockParam(
                         type="image",
                         source={"type": "base64", "media_type": attachment.mime_type, "data": base64_image},
                     )
-                    formatted_messages.append(image_block)
+                    attachments.append(image_block)
         # Append the new prompt as the latest user message.
-        formatted_messages.append(MessageParam(role=MessageRole.USER.value, content=current_message.content))
+        text_block = TextBlockParam(type="text", text=current_message.content)
+        formatted_messages.append(MessageParam(role=MessageRole.USER.value, content=[text_block, *attachments]))
         return formatted_messages
 
     async def generate_stream(
