@@ -24,7 +24,7 @@ class ChatMessage(TimeStampedBase):
 
     session_id: Mapped[UUID] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True)
     role: Mapped[MessageRole] = mapped_column(String(50))
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[MessageStatus] = mapped_column(String(50), default=MessageStatus.PENDING, index=True)
 
     # Token usage tracking
