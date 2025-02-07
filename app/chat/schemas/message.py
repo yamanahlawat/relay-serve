@@ -27,18 +27,12 @@ class MessageInBase(BaseModel):
     Base schema for creating a new message
     """
 
-    content: str = Field(min_length=1)
-    role: MessageRole = Field(default=MessageRole.USER)
-    status: MessageStatus = Field(default=MessageStatus.PENDING)
+    content: str | None = None
+    role: MessageRole = MessageRole.USER
+    status: MessageStatus = MessageStatus.PENDING
     parent_id: UUID | None = None
     usage: MessageUsage = Field(default_factory=MessageUsage)
     extra_data: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("content")
-    def validate_content(cls, v: str) -> str:
-        if len(v.strip()) == 0:
-            raise ValueError("Content cannot be empty or just whitespace")
-        return v.strip()
 
 
 class MessageIn(MessageInBase):
@@ -51,7 +45,7 @@ class MessageIn(MessageInBase):
     @classmethod
     def as_form(
         cls,
-        content: Annotated[str, Form()],
+        content: Annotated[str | None, Form()] = None,
         role: Annotated[MessageRole, Form()] = MessageRole.USER,
         status: Annotated[MessageStatus, Form()] = MessageStatus.PENDING,
         parent_id: Annotated[str | None, Form()] = None,
@@ -59,7 +53,9 @@ class MessageIn(MessageInBase):
         attachments: Annotated[list[UploadFile], File()] = [],
         extra_data: Annotated[str, Form()] = "{}",
     ) -> "MessageIn":
-        """Convert form data to MessageIn model"""
+        """
+        Convert form data to MessageIn model
+        """
         try:
             # Parse parent_id to UUID if provided
             parent_uuid = UUID(parent_id) if parent_id else None
@@ -97,7 +93,7 @@ class MessageRead(BaseModel):
     id: UUID
     session_id: UUID
     role: MessageRole
-    content: str
+    content: str | None = None
     status: MessageStatus
     parent_id: UUID | None = None
     created_at: datetime
