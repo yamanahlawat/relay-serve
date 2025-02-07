@@ -1,13 +1,15 @@
 from uuid import UUID
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import AttachmentType
 from app.chat.crud import crud_attachment
 from app.chat.models import Attachment
 from app.chat.schemas.attachment import AttachmentCreate
-from app.storages.utils import get_storage
+from app.files.image.constants import ImageLimits
+from app.files.image.processor import ImageProcessor
+from app.files.storage.utils import get_storage
 
 
 class AttachmentService:
@@ -33,19 +35,36 @@ class AttachmentService:
         """
         Create a single attachment
         """
+        content_type = file.content_type
+        attachment_type = self.get_attachment_type(content_type=content_type)
+
+        # Process image if it's an image file
+        if attachment_type == AttachmentType.IMAGE:
+            try:
+                file = await ImageProcessor.process_image(
+                    file=file,
+                    limits=ImageLimits(
+                        max_width=1024,
+                        max_height=1024,
+                        max_file_size=20 * 1024 * 1024,  # 20MB
+                    ),
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to process image attachment: {e}")
+
         # Save file and get storage path
         storage_path = await self.storage.save_file_to_folder(file=file, folder=f"{session_id}/{message_id}")
 
         # Create attachment record
-        attachment_type = self.get_attachment_type(file.content_type)
         attachment_create = AttachmentCreate(
             message_id=message_id,
             file_name=file.filename,
             file_size=file.size,
-            mime_type=file.content_type,
+            mime_type=content_type,
             type=attachment_type,
             storage_path=str(storage_path),
         )
+
         return await crud_attachment.create(db=self.db, obj_in=attachment_create)
 
     async def create_attachments(self, files: list[UploadFile], message_id: UUID, session_id: UUID) -> list[Attachment]:
