@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.storages.utils import get_storage, normalize_filename, sanitize_filename
+from app.files.storage.utils import get_storage, normalize_filename, sanitize_filename
 
 router = APIRouter(prefix="/attachments", tags=["Attachments"])
 

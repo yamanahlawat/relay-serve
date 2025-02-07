@@ -14,6 +14,7 @@ from openai import (
 from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
+from app.files.image.processor import ImageProcessor
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import (
@@ -24,7 +25,6 @@ from app.providers.exceptions import (
 )
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
-from app.storages.utils import encode_image_to_base64
 
 
 class OpenAIProvider(LLMProviderBase):
@@ -53,7 +53,7 @@ class OpenAIProvider(LLMProviderBase):
         if is_current and message.attachments:
             for attachment in message.attachments:
                 if attachment.type == AttachmentType.IMAGE.value:
-                    base64_image = encode_image_to_base64(image_path=attachment.storage_path)
+                    base64_image = ImageProcessor.encode_image_to_base64(image_path=attachment.storage_path)
                     content.append(
                         {
                             "type": "image_url",
