@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.chat.constants import SessionStatus
 from app.chat.schemas.common import ChatUsage
@@ -37,8 +37,7 @@ class SessionRead(BaseModel):
     usage: ChatUsage | None = None
     extra_data: dict[str, Any]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionUpdate(BaseModel):

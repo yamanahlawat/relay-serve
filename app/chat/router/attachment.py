@@ -1,9 +1,22 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.chat.dependencies.attachment import get_attachment_service
+from app.chat.models.attachment import Attachment
+from app.chat.schemas.attachment import AttachmentRead
+from app.chat.services.attachment import AttachmentService
 from app.files.storage.utils import get_storage, normalize_filename, sanitize_filename
 
 router = APIRouter(prefix="/attachments", tags=["Attachments"])
+
+
+@router.post("/", response_model=list[AttachmentRead])
+async def upload_attachments(
+    folder: str,
+    files: list[UploadFile],
+    service: AttachmentService = Depends(get_attachment_service),
+) -> list[Attachment]:
+    return await service.bulk_create_attachments(folder=folder, files=files)
 
 
 @router.get("/{folder:path}/{filename}", response_class=StreamingResponse)

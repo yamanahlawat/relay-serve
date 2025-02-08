@@ -1,4 +1,4 @@
-from uuid import UUID
+import asyncio
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,7 @@ class AttachmentService:
             return AttachmentType.DOCUMENT
         raise ValueError(f"Unsupported content type: {content_type}")
 
-    async def create_attachment(self, file: UploadFile, message_id: UUID, session_id: UUID) -> Attachment:
+    async def create_attachment(self, folder: str, file: UploadFile) -> Attachment:
         """
         Create a single attachment
         """
@@ -53,11 +53,10 @@ class AttachmentService:
                 raise HTTPException(status_code=400, detail=f"Failed to process image attachment: {e}")
 
         # Save file and get storage path
-        storage_path = await self.storage.save_file_to_folder(file=file, folder=f"{session_id}/{message_id}")
+        storage_path = await self.storage.save_file_to_folder(file=file, folder=folder)
 
         # Create attachment record
         attachment_create = AttachmentCreate(
-            message_id=message_id,
             file_name=file.filename,
             file_size=file.size,
             mime_type=content_type,
@@ -67,12 +66,9 @@ class AttachmentService:
 
         return await crud_attachment.create(db=self.db, obj_in=attachment_create)
 
-    async def create_attachments(self, files: list[UploadFile], message_id: UUID, session_id: UUID) -> list[Attachment]:
+    async def bulk_create_attachments(self, folder: str, files: list[UploadFile]) -> list[Attachment]:
         """
-        Create multiple attachments for a message
+        Create multiple attachments
         """
-        attachments = []
-        for file in files:
-            attachment = await self.create_attachment(file=file, message_id=message_id, session_id=session_id)
-            attachments.append(attachment)
-        return attachments
+        tasks = [self.create_attachment(folder=folder, file=file) for file in files]
+        return await asyncio.gather(*tasks)

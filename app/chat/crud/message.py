@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.chat.constants import MessageRole, MessageStatus
 from app.chat.models import ChatMessage
+from app.chat.models.message import MessageAttachment
 from app.chat.schemas.message import MessageCreate, MessageUpdate
 from app.database.crud import CRUDBase
 
@@ -16,25 +17,25 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
     CRUD operations for chat messages
     """
 
-    async def get_with_attachments(self, db: AsyncSession, id: UUID) -> ChatMessage | None:
+    async def get_with_attachments(self, db: AsyncSession, id: UUID) -> ChatMessage:
         """
         Get a chat message by ID with attachments.
         Args:
             db (AsyncSession): Database session
             id (UUID): ID of the message to fetch
         Returns:
-            ChatMessage | None: Chat message with attachments if found, else None
+            ChatMessage: Chat message with attachments
         """
-        statement = select(self.model).options(selectinload(self.model.attachments)).where(self.model.id == id)
+        statement = select(self.model).options(selectinload(self.model.direct_attachments)).where(self.model.id == id)
         result = await db.execute(statement)
-        return result.scalar_one_or_none()
+        return result.scalar_one()
 
-    async def create_with_session(
+    async def create(
         self,
         db: AsyncSession,
         *,
-        session_id: UUID,
         obj_in: MessageCreate,
+        session_id: UUID,
     ) -> ChatMessage:
         """
         Create a new message for a specific chat session.
@@ -47,6 +48,7 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         """
         message_data = obj_in.model_dump()
         usage = message_data.pop("usage")
+        attachments = message_data.pop("attachment_ids")
         db_obj = ChatMessage(
             **message_data,
             session_id=session_id,
@@ -56,8 +58,18 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
             output_cost=usage["output_cost"],
         )
         db.add(db_obj)
+        await db.flush()
+
+        # Create message attachments
+        if attachments:
+            message_attachments = [
+                MessageAttachment(message_id=db_obj.id, attachment_id=attach_id) for attach_id in attachments
+            ]
+            db.add_all(message_attachments)
+
         await db.commit()
-        await db.refresh(db_obj)
+        # Refresh with explicit loading of relationships
+        db_obj = await self.get_with_attachments(db=db, id=db_obj.id)
         return db_obj
 
     async def list_by_session(
@@ -79,7 +91,7 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
         """
         query = (
             select(self.model)
-            .options(selectinload(self.model.attachments))
+            .options(selectinload(self.model.direct_attachments))
             .where(self.model.session_id == session_id)
             .order_by(desc(self.model.created_at))
             .offset(offset)
