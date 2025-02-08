@@ -23,10 +23,9 @@ class AttachmentBase(BaseModel):
 class AttachmentCreate(AttachmentBase):
     """
     Schema for creating a new Attachment.
-    Includes the required message_id.
     """
 
-    message_id: UUID
+    pass
 
 
 class AttachmentUpdate(BaseModel):
@@ -51,7 +50,6 @@ class AttachmentRead(AttachmentBase):
     """
 
     id: UUID
-    message_id: UUID
     created_at: datetime
     updated_at: datetime
 
