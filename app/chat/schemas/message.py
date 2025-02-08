@@ -1,10 +1,8 @@
-import json
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Any, Self
 from uuid import UUID
 
-from fastapi import File, Form, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.chat.constants import MessageRole, MessageStatus
 from app.chat.schemas import AttachmentRead
@@ -22,71 +20,31 @@ class MessageUsage(BaseModel):
     output_cost: float = Field(default=0.0, ge=0.0, le=1000.0)
 
 
-class MessageInBase(BaseModel):
+class MessageBase(BaseModel):
     """
     Base schema for creating a new message
     """
 
-    content: str = Field(min_length=1)
-    role: MessageRole = Field(default=MessageRole.USER)
-    status: MessageStatus = Field(default=MessageStatus.PENDING)
+    content: str | None = None
+    role: MessageRole = MessageRole.USER
+    status: MessageStatus = MessageStatus.PENDING
     parent_id: UUID | None = None
     usage: MessageUsage = Field(default_factory=MessageUsage)
     extra_data: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("content")
-    def validate_content(cls, v: str) -> str:
-        if len(v.strip()) == 0:
-            raise ValueError("Content cannot be empty or just whitespace")
-        return v.strip()
 
-
-class MessageIn(MessageInBase):
-    """
-    Schema for creating a new message from API
-    """
-
-    attachments: list[UploadFile] = Form(default_factory=list)
-
-    @classmethod
-    def as_form(
-        cls,
-        content: Annotated[str, Form()],
-        role: Annotated[MessageRole, Form()] = MessageRole.USER,
-        status: Annotated[MessageStatus, Form()] = MessageStatus.PENDING,
-        parent_id: Annotated[str | None, Form()] = None,
-        usage: Annotated[str, Form()] = "{}",
-        attachments: Annotated[list[UploadFile], File()] = [],
-        extra_data: Annotated[str, Form()] = "{}",
-    ) -> "MessageIn":
-        """Convert form data to MessageIn model"""
-        try:
-            # Parse parent_id to UUID if provided
-            parent_uuid = UUID(parent_id) if parent_id else None
-
-            # Parse JSON strings
-            usage_dict = json.loads(usage)
-            extra_data_dict = json.loads(extra_data)
-
-            return cls(
-                content=content,
-                role=role,
-                status=status,
-                parent_id=parent_uuid,
-                usage=MessageUsage(**usage_dict),
-                attachments=attachments,
-                extra_data=extra_data_dict,
-            )
-        except ValueError as e:
-            raise ValueError(f"Invalid UUID format: {e}")
-
-
-class MessageCreate(MessageInBase):
+class MessageCreate(MessageBase):
     """
     Schema for creating a new message
     """
 
-    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    attachment_ids: list[UUID] = Field(default_factory=list, description="List of attachment IDs already uploaded")
+
+    @model_validator(mode="after")
+    def check_content_or_attachments(self) -> Self:
+        if not self.content and not self.attachment_ids:
+            raise ValueError("Either non-empty content or at least one attachment must be provided.")
+        return self
 
 
 class MessageRead(BaseModel):
@@ -97,18 +55,21 @@ class MessageRead(BaseModel):
     id: UUID
     session_id: UUID
     role: MessageRole
-    content: str
+    content: str | None = None
     status: MessageStatus
     parent_id: UUID | None = None
     created_at: datetime
     usage: ChatUsage | None = None
-    attachments: list[AttachmentRead] = Field(default_factory=list)
+    attachments: list[AttachmentRead] = Field(
+        default_factory=list,
+        serialization_alias="attachments",
+        alias="direct_attachments",
+    )
     error_code: str | None = None
     error_message: str | None = None
     extra_data: dict[str, Any]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class MessageUpdate(BaseModel):

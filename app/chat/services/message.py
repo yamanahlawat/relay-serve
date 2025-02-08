@@ -11,8 +11,7 @@ from app.chat.exceptions.message import (
     ParentMessageNotFoundException,
 )
 from app.chat.models import ChatMessage
-from app.chat.schemas import MessageCreate, MessageIn, MessageUpdate
-from app.chat.services.attachment import AttachmentService
+from app.chat.schemas import MessageCreate, MessageUpdate
 from app.chat.services.session import ChatSessionService
 
 
@@ -21,7 +20,7 @@ class ChatMessageService:
         self.db = db
         self.session_service = ChatSessionService(db=self.db)
 
-    async def create_message(self, message_in: MessageIn, session_id: UUID) -> ChatMessage:
+    async def create_message(self, message_in: MessageCreate, session_id: UUID) -> ChatMessage:
         session = await self.session_service.get_session(session_id=session_id)
         # Verify parent message if provided
         if message_in.parent_id:
@@ -30,18 +29,8 @@ class ChatMessageService:
                 raise ParentMessageNotFoundException(parent_id=message_in.parent_id)
             if parent.session_id != session.id:
                 raise InvalidParentMessageSessionException()
-
-        message_create = MessageCreate(**message_in.model_dump(exclude={"attachments"}))
-        message = await crud_message.create_with_session(db=self.db, session_id=session_id, obj_in=message_create)
-
-        # Process attachments if any
-        if message_in.attachments:
-            attachment_service = AttachmentService(db=self.db)
-            await attachment_service.create_attachments(
-                files=message_in.attachments, message_id=message.id, session_id=session_id
-            )
-        await self.db.refresh(message, ["attachments"])
-        return message
+        # Create the message (which will also create the message attachments)
+        return await crud_message.create(db=self.db, obj_in=message_in, session_id=session_id)
 
     async def list_messages(self, session_id: UUID, offset: int = 0, limit: int = 10) -> Sequence[ChatMessage]:
         messages = await crud_message.list_by_session(db=self.db, session_id=session_id, offset=offset, limit=limit)

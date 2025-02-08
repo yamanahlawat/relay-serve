@@ -24,7 +24,7 @@ class ChatMessage(TimeStampedBase):
 
     session_id: Mapped[UUID] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True)
     role: Mapped[MessageRole] = mapped_column(String(50))
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[MessageStatus] = mapped_column(String(50), default=MessageStatus.PENDING, index=True)
 
     # Token usage tracking
@@ -37,7 +37,14 @@ class ChatMessage(TimeStampedBase):
     parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
 
     # Attachments
-    attachments: Mapped[list[Attachment]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    attachments: Mapped[list["MessageAttachment"]] = relationship(
+        back_populates="message", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    # Direct relationship to attachments through association
+    direct_attachments: Mapped[list["Attachment"]] = relationship(
+        secondary="message_attachments", viewonly=True, lazy="selectin"
+    )
 
     # Error tracking
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -67,3 +74,24 @@ class ChatMessage(TimeStampedBase):
             "output_cost": float(self.output_cost),
             "total_cost": float(self.input_cost + self.output_cost),
         }
+
+
+class MessageAttachment(TimeStampedBase):
+    """
+    Model for storing attachments linked to chat messages
+    """
+
+    __tablename__ = "message_attachments"
+
+    id: Mapped[UUID] = mapped_column(default=uuid4, primary_key=True, index=True)
+    message_id: Mapped[UUID] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attachment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("attachments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Relationship to the parent message
+    message: Mapped[ChatMessage] = relationship(back_populates="attachments")
+    # Reference to the attachment (one-directional – Attachment remains unaware)
+    attachment: Mapped[Attachment] = relationship()
