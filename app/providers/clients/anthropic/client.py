@@ -66,7 +66,7 @@ class AnthropicProvider(LLMProviderBase):
 
         attachments = []
         if current_message.attachments:
-            for attachment in current_message.attachments:
+            for attachment in current_message.direct_attachments:
                 if attachment.type == AttachmentType.IMAGE.value:
                     base64_image = ImageProcessor.encode_image_to_base64(image_path=attachment.storage_path)
                     image_block = ImageBlockParam(

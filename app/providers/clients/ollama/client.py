@@ -69,7 +69,7 @@ class OllamaProvider(LLMProviderBase):
             formatted_messages.append(Message(role=role, content=message.content))
         # Append the new prompt as a user message.
         message_images = []
-        for attachment in current_message.attachments:
+        for attachment in current_message.direct_attachments:
             if attachment.type == AttachmentType.IMAGE.value:
                 message_images.append(Image(value=attachment.storage_path))
         formatted_messages.append(
@@ -196,7 +196,7 @@ class OllamaProvider(LLMProviderBase):
 
     async def generate(
         self,
-        prompt: str,
+        current_message: ChatMessage,
         model: str,
         system_context: str,
         max_tokens: int,
@@ -210,7 +210,7 @@ class OllamaProvider(LLMProviderBase):
             A tuple containing (generated text, input tokens, output tokens).
         """
         formatted_messages = self._prepare_messages(
-            messages=messages or [], new_prompt=prompt, system_context=system_context
+            messages=messages or [], current_message=current_message, system_context=system_context
         )
         options = {
             "num_predict": max_tokens,
