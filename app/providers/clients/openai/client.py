@@ -51,7 +51,7 @@ class OpenAIProvider(LLMProviderBase):
 
         # Add any image attachments
         if is_current and message.attachments:
-            for attachment in message.attachments:
+            for attachment in message.direct_attachments:
                 if attachment.type == AttachmentType.IMAGE.value:
                     base64_image = ImageProcessor.encode_image_to_base64(image_path=attachment.storage_path)
                     content.append(

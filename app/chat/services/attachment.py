@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,10 +63,3 @@ class AttachmentService:
         )
 
         return await crud_attachment.create(db=self.db, obj_in=attachment_create)
-
-    async def bulk_create_attachments(self, folder: str, files: list[UploadFile]) -> list[Attachment]:
-        """
-        Create multiple attachments
-        """
-        tasks = [self.create_attachment(folder=folder, file=file) for file in files]
-        return await asyncio.gather(*tasks)
