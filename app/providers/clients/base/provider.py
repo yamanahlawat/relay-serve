@@ -53,8 +53,12 @@ class LLMProviderBase(ABC):
         self,
         current_message: ChatMessage,
         model: str,
+        system_context: str,
         max_tokens: int,
         temperature: float,
+        top_p: float,
+        messages: Sequence[ChatMessage] | None = None,
+        session_id: UUID | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using the provider in a streaming manner.

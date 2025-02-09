@@ -10,16 +10,26 @@ from app.files.storage.utils import get_storage, normalize_filename, sanitize_fi
 router = APIRouter(prefix="/attachments", tags=["Attachments"])
 
 
-@router.post("/", response_model=list[AttachmentRead])
-async def upload_attachments(
+@router.post("/{folder}/", response_model=AttachmentRead)
+async def upload_attachment(
     folder: str,
-    files: list[UploadFile],
+    file: UploadFile,
     service: AttachmentService = Depends(get_attachment_service),
-) -> list[Attachment]:
-    return await service.bulk_create_attachments(folder=folder, files=files)
+) -> Attachment:
+    """
+    Upload a single file attachment.
+    Args:
+        folder: Storage folder path (e.g. 'session_id/message_id')
+        file: File to upload
+    Returns:
+        Uploaded attachment details
+    Raises:
+        HTTPException: If file type not supported or upload fails
+    """
+    return await service.create_attachment(folder=folder, file=file)
 
 
-@router.get("/{folder:path}/{filename}", response_class=StreamingResponse)
+@router.get("/{folder:path}/{filename}/", response_class=StreamingResponse)
 async def serve_attachment(folder: str, filename: str) -> StreamingResponse:
     """
     Serves an attachment file.

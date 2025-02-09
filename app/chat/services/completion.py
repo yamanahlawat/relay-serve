@@ -81,7 +81,7 @@ class ChatCompletionService:
         Create a new user message with token counting and cost calculation.
         """
 
-        return await crud_message.create_with_session(
+        return await crud_message.create(
             db=self.db,
             session_id=session_id,
             obj_in=MessageCreate(
@@ -133,7 +133,7 @@ class ChatCompletionService:
         output_cost = output_tokens * model.output_cost_per_token
 
         # Create message with usage metrics
-        assistant_message = await crud_message.create_with_session(
+        assistant_message = await crud_message.create(
             db=self.db,
             session_id=chat_session.id,
             obj_in=MessageCreate(
