@@ -187,23 +187,37 @@ class OpenAIProvider(LLMProviderBase):
                 stream_options={"include_usage": True},
             )
 
+            final_flag = False
             async for chunk in stream:
                 if cancel_key and await sse_manager.redis.exists(cancel_key):
                     logger.warning(f"Stream cancelled for session {session_id}")
                     await stream.close()  # Explicitly close the stream from the SDK
                     break
 
-                # Check if this is the final chunk containing usage info.
-                if chunk.usage is not None:
-                    usage = chunk.usage
-                    # Extract prompt_tokens and completion_tokens
-                    self._last_usage = (usage.prompt_tokens, usage.completion_tokens)
-                    yield ("", True)
-                    break  # End of stream
+                chunk_choices = chunk.choices
+                # Case 1: Chunk with choices present
+                if chunk_choices:
+                    # If this chunk signals finish ("stop")
+                    if chunk_choices[0].finish_reason == "stop":
+                        # If usage is already provided in this chunk (e.g. Codestral-2501)
+                        if chunk.usage is not None:
+                            self._last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
+                            yield ("", True)
+                            break
+                        else:
+                            # Otherwise, set a flag to expect an extra chunk with usage data.
+                            final_flag = True
+                            continue
 
-                # Otherwise, yield the content if available.
-                if chunk.choices and (content := chunk.choices[0].delta.content):
-                    yield (content, False)
+                    # Yield content if available.
+                    if chunk_choices[0].delta.content:
+                        yield (chunk_choices[0].delta.content, False)
+
+                # Case 2: Chunk with no choices but with usage data
+                elif final_flag and chunk.usage is not None:
+                    self._last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
+                    yield ("", True)
+                    break
 
         except (
             APIConnectionError,
