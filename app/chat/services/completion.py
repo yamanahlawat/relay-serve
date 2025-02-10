@@ -2,6 +2,7 @@ from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
 from langfuse.decorators import langfuse_context, observe
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus, error_messages
@@ -22,7 +23,7 @@ from app.providers.models import LLMModel, LLMProvider
 
 class ChatCompletionService:
     """
-    Service for handling chat completions
+    Service for handling chat completions.
     """
 
     def __init__(
@@ -42,7 +43,6 @@ class ChatCompletionService:
         Validate the chat completion request and return required models.
         Args:
             session_id: UUID of the chat session
-            request: Chat completion request
         Returns:
             Tuple of (ChatSession, LLMProvider, LLMModel)
         """
@@ -78,9 +78,8 @@ class ChatCompletionService:
         parent_id: UUID | None = None,
     ) -> ChatMessage:
         """
-        Create a new user message with token counting and cost calculation.
+        Create a new user message.
         """
-
         return await crud_message.create(
             db=self.db,
             session_id=session_id,
@@ -161,7 +160,7 @@ class ChatCompletionService:
         model_parameters: dict,
     ) -> None:
         """
-        Update langfuse trace with complete context.
+        Update Langfuse trace with complete context.
         """
         langfuse_context.update_current_observation(
             session_id=str(chat_session.id),
@@ -204,6 +203,41 @@ class ChatCompletionService:
             return error_messages.PROVIDER_ERROR
         return error_messages.GENERAL_ERROR
 
+    async def finalize_assistant_message(
+        self,
+        chat_session: ChatSession,
+        message_id: UUID,
+        model: LLMModel,
+        current_message: ChatMessage,
+        full_content: str,
+        params: CompletionParams,
+        provider_client: LLMProviderBase,
+    ) -> None:
+        """
+        Finalize the assistant message by creating it and updating the Langfuse trace.
+        """
+        input_tokens, output_tokens = provider_client.get_token_usage()
+        assistant_message = await self.create_assistant_message(
+            chat_session=chat_session,
+            content=full_content,
+            parent_id=message_id,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+        self.update_langfuse_trace(
+            chat_session=chat_session,
+            assistant_message=assistant_message,
+            user_message=current_message,
+            model=model.name,
+            usage={"input": input_tokens, "output": output_tokens},
+            model_parameters={
+                "max_tokens": params.max_tokens,
+                "temperature": params.temperature,
+                "top_p": params.top_p,
+            },
+        )
+
     @observe(name="streaming")
     async def generate_chat_stream(
         self,
@@ -214,8 +248,12 @@ class ChatCompletionService:
         message_id: UUID,
     ) -> AsyncGenerator[str, None]:
         """
-        Generate streaming response
+        Generate streaming response.
+        Ensures that if the stream ends without a final flag, the assistant message is still created.
         """
+        final_received = False
+        full_content = ""
+
         try:
             # Get the message
             current_message = await self.message_service.get_message(
@@ -227,8 +265,6 @@ class ChatCompletionService:
                 chat_session=chat_session,
                 current_message_id=message_id,
             )
-            full_content = ""
-
             model_params = self.get_model_params(model=model, request_params=params)
             system_context = chat_session.system_context
 
@@ -244,36 +280,35 @@ class ChatCompletionService:
                     yield chunk
 
                 if is_final:
-                    input_tokens, output_tokens = provider_client.get_token_usage()
-                    assistant_message = await self.create_assistant_message(
+                    final_received = True
+                    await self.finalize_assistant_message(
                         chat_session=chat_session,
-                        content=full_content,
-                        parent_id=message_id,
+                        message_id=message_id,
                         model=model,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
+                        current_message=current_message,
+                        full_content=full_content,
+                        params=params,
+                        provider_client=provider_client,
                     )
-
-                    self.update_langfuse_trace(
-                        chat_session=chat_session,
-                        assistant_message=assistant_message,
-                        user_message=current_message,
-                        model=model.name,
-                        usage={
-                            "input": input_tokens,
-                            "output": output_tokens,
-                        },
-                        model_parameters={
-                            "max_tokens": params.max_tokens,
-                            "temperature": params.temperature,
-                            "top_p": params.top_p,
-                        },
-                    )
+                    break
 
         except Exception as error:
             error_message = await self.handle_provider_error(error)
             yield error_message
             return
+
+        finally:
+            if not final_received and full_content:
+                logger.info("Did not receive final flag, finalizing assistant message")
+                await self.finalize_assistant_message(
+                    chat_session=chat_session,
+                    message_id=message_id,
+                    model=model,
+                    current_message=current_message,
+                    full_content=full_content,
+                    params=params,
+                    provider_client=provider_client,
+                )
 
     @observe(name="non_streaming")
     async def generate_complete(
@@ -285,7 +320,7 @@ class ChatCompletionService:
         user_message: ChatMessage,
     ) -> CompletionResponse:
         """
-        Generate complete response
+        Generate complete response.
         """
         try:
             # Get conversation history

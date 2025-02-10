@@ -73,3 +73,12 @@ class LLMProviderBase(ABC):
             str: The generated text chunks in a stream.
         """
         pass
+
+    @abstractmethod
+    def get_token_usage(self) -> tuple[int, int]:
+        """
+        Get token usage from the last operation.
+        Returns:
+            A tuple (prompt_tokens, completion_tokens).
+        """
+        pass
