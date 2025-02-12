@@ -15,7 +15,7 @@ from app.chat.schemas.message import MessageUsage
 from app.chat.schemas.stream import StreamBlockType
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
-from app.model_context_protocol.services.tool import MCPService
+from app.model_context_protocol.services.tool import MCPToolService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
 from app.providers.exceptions.client import ProviderAPIError, ProviderConnectionError, ProviderRateLimitError
@@ -36,7 +36,7 @@ class ChatCompletionService:
         self.db = db
         self.provider_factory = provider_factory
         self.message_service = ChatMessageService(db=self.db)
-        self.mcp_service = MCPService()
+        self.mcp_service = MCPToolService()
 
     async def validate_request(
         self,

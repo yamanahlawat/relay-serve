@@ -1,11 +1,13 @@
 from typing import Sequence
 
+from loguru import logger
+
 from app.model_context_protocol.exceptions import MCPToolError
 from app.model_context_protocol.initialize import mcp_registry
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
 
 
-class MCPService:
+class MCPToolService:
     """
     Service for managing MCP tool operations.
     """
@@ -60,6 +62,7 @@ class MCPService:
             if not tool:
                 raise MCPToolError(f"Tool {tool_call.name} not found")
 
+        logger.info(f"Executing tool: {tool_call.name} with arguments: {tool_call.arguments}")
         # Get server session
         session = await self.registry.get_server_session(tool.server_name)
 

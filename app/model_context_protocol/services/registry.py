@@ -2,7 +2,7 @@ from loguru import logger
 from mcp import ClientSession
 
 from app.model_context_protocol.exceptions import MCPServerNotFoundError
-from app.model_context_protocol.manager import MCPServerManager
+from app.model_context_protocol.services.manager import MCPServerManager
 from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfig
 
 
