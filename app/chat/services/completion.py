@@ -1,4 +1,4 @@
-from typing import Any, AsyncGenerator, Sequence
+from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
 from langfuse.decorators import langfuse_context, observe
@@ -215,7 +215,6 @@ class ChatCompletionService:
         full_content: str,
         params: CompletionParams,
         provider_client: LLMProviderBase,
-        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Finalize the assistant message with complete content and metadata.
@@ -238,7 +237,6 @@ class ChatCompletionService:
                     input_cost=input_tokens * model.input_cost_per_token,
                     output_cost=output_tokens * model.output_cost_per_token,
                 ),
-                extra_data=metadata or {},
             ),
         )
 
@@ -362,7 +360,6 @@ class ChatCompletionService:
                             full_content="".join(full_content),
                             params=params,
                             provider_client=provider_client,
-                            metadata={"tool_outputs": tool_outputs, **block.metadata},
                         )
                         break
 

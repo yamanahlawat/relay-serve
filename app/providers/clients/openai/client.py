@@ -201,12 +201,10 @@ class OpenAIProvider(LLMProviderBase):
     async def _execute_tool(self, name: str, arguments: dict[str, Any], call_id: str | None = None) -> ToolResult:
         """
         Execute a tool using the MCP service.
-
         Args:
             name: Name of the tool to execute
             arguments: Tool arguments
             call_id: Optional call identifier for tracking
-
         Returns:
             ToolResult containing the execution result
         """
@@ -218,26 +216,29 @@ class OpenAIProvider(LLMProviderBase):
             logger.exception(f"Tool execution failed: {error}")
             raise
 
-    def _handle_completion(self, chunk: Any) -> tuple[tuple[int, int] | None, bool]:
+    def _handle_completion(self, chunk: Any) -> bool:
         """
-        Handle completion/finish of a stream chunk.
-
+        Handle completion/finish of a stream chunk and manage usage.
         Args:
             chunk: Response chunk from OpenAI API
-
         Returns:
-            Tuple of (token_usage, should_stop)
-            - token_usage: Tuple of (prompt_tokens, completion_tokens) or None
-            - should_stop: Boolean indicating if streaming should stop
+            bool: True if streaming should stop, False to continue
         """
-
-        finish_reason = chunk.choices[0].finish_reason
-        if finish_reason == "stop":
-            if chunk.usage:
+        # Empty choices chunk - check for usage
+        if not chunk.choices:
+            if hasattr(chunk, "usage") and chunk.usage:
                 self._last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
-                return self._last_usage, True
-            return None, True
-        return None, False
+                return True
+            return False
+
+        # Check for stop reason and usage
+        if chunk.choices[0].finish_reason == "stop":
+            if hasattr(chunk, "usage") and chunk.usage:
+                self._last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
+                return True
+            return False
+
+        return False
 
     async def _accumulate_tool_call(self, delta_tool_call: Any) -> dict[str, Any]:
         """
@@ -269,7 +270,9 @@ class OpenAIProvider(LLMProviderBase):
         """
         try:
             # Signal initial thinking state
-            yield StreamManager.create_thinking_block(content="Thinking...", metadata={"phase": "initialization"})
+            yield StreamManager.create_thinking_block(
+                content="Thinking...",
+            )
 
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
@@ -292,6 +295,7 @@ class OpenAIProvider(LLMProviderBase):
                 stream=True,
                 tools=formatted_tools,
                 tool_choice="auto",
+                stream_options={"include_usage": True},
             )
 
             current_tool_calls: dict[str, dict] = {}
@@ -301,20 +305,23 @@ class OpenAIProvider(LLMProviderBase):
 
             async for chunk in stream:
                 if await self._should_cancel(session_id):
-                    yield StreamManager.create_content_block(
-                        content="Request cancelled", metadata={"status": "cancelled"}
-                    )
+                    yield StreamManager.create_content_block(content="Request cancelled")
+                    break
+
+                # Handle regular content
+                if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
+                    current_content += content
+                    yield StreamManager.create_content_block(content=content)
+
+                # Check for completion/usage
+                if self._handle_completion(chunk=chunk):
+                    yield StreamManager.create_done_block()
                     break
 
                 if not chunk.choices:
                     continue
 
                 delta = chunk.choices[0].delta
-
-                # Handle regular content
-                if content := getattr(delta, "content", None):
-                    current_content += content
-                    yield StreamManager.create_content_block(content=content)
 
                 # Handle tool calls
                 if tool_calls := getattr(delta, "tool_calls", []):
@@ -336,12 +343,10 @@ class OpenAIProvider(LLMProviderBase):
                             if tool_call.function.name:
                                 yield StreamManager.create_thinking_block(
                                     content=f"Preparing to use tool: {tool_call.function.name}",
-                                    metadata={"phase": "tool_preparation"},
                                 )
                                 yield StreamManager.create_tool_start_block(
                                     tool_name=tool_call.function.name,
                                     tool_call_id=tool_id,
-                                    metadata={"status": "starting"},
                                 )
                         elif tool_id and tool_call.function.arguments:
                             # Accumulate arguments for existing tool call
@@ -354,14 +359,13 @@ class OpenAIProvider(LLMProviderBase):
                             parsed_args = json.loads(tool_call["arguments"])
 
                             yield StreamManager.create_thinking_block(
-                                content=f"Executing tool: {tool_call['name']}", metadata={"phase": "tool_execution"}
+                                content=f"Executing tool: {tool_call['name']}",
                             )
 
                             yield StreamManager.create_tool_call_block(
                                 tool_name=tool_call["name"],
                                 tool_args=parsed_args,
                                 tool_call_id=tool_id,
-                                metadata={"status": "executing"},
                             )
 
                             tool_result = await self._execute_tool(name=tool_call["name"], arguments=parsed_args)
@@ -394,29 +398,21 @@ class OpenAIProvider(LLMProviderBase):
                                 content=tool_result.content,
                                 tool_call_id=tool_id,
                                 tool_name=tool_call["name"],
-                                metadata={
-                                    "status": "completed",
-                                    "content_types": [item.type for item in tool_result.content],
-                                },
                             )
 
                             # Signal thinking state for processing tool result
                             yield StreamManager.create_thinking_block(
                                 content=f"Processing {tool_call['name']} results...",
-                                metadata={"phase": "tool_result_processing"},
                             )
 
                         except Exception as tool_error:
                             yield StreamManager.create_error_block(
                                 error_type="tool_execution_error",
                                 error_detail=str(tool_error),
-                                metadata={"tool_name": tool_call["name"], "tool_id": tool_id},
                             )
 
                     # Continue stream with tool results
-                    yield StreamManager.create_thinking_block(
-                        content="Continuing with tool results...", metadata={"phase": "continuation"}
-                    )
+                    yield StreamManager.create_thinking_block(content="Continuing with tool results...")
 
                     continue_stream = await self._client.chat.completions.create(
                         model=model,
@@ -427,41 +423,23 @@ class OpenAIProvider(LLMProviderBase):
                         stream=True,
                         tools=formatted_tools,
                         tool_choice="auto",
+                        stream_options={"include_usage": True},
                     )
 
                     async for cont_chunk in continue_stream:
-                        if not cont_chunk.choices:
-                            continue
-                        if content := getattr(cont_chunk.choices[0].delta, "content", None):
+                        # Process content from delta if present
+                        if cont_chunk.choices and (content := getattr(cont_chunk.choices[0].delta, "content", None)):
                             current_content += content
                             yield StreamManager.create_content_block(content=content)
-                        # Use the same completion handling logic
-                        usage, should_stop = self._handle_completion(cont_chunk)
-                        if should_stop:
-                            if usage:
-                                self._last_usage = usage
-                            yield StreamManager.create_done_block(
-                                metadata={"final_content": current_content, "token_usage": self._last_usage}
-                            )
-                            break
 
-                elif chunk.choices[0].finish_reason == "stop":
-                    if not chunk.choices:
-                        continue
-                    # Handle regular completion
-                    usage, should_stop = self._handle_completion(chunk)
-                    if should_stop:
-                        if usage:
-                            self._last_usage = usage
-                        yield StreamManager.create_done_block(
-                            metadata={"final_content": current_content, "token_usage": self._last_usage}
-                        )
+                        # Check for completion/usage
+                        if self._handle_completion(cont_chunk):
+                            yield StreamManager.create_done_block()
+                            break
 
         except Exception as error:
             logger.exception("Error in generate_stream")
-            yield StreamManager.create_error_block(
-                error_type=type(error).__name__, error_detail=str(error), metadata={"phase": "stream_generation"}
-            )
+            yield StreamManager.create_error_block(error_type=type(error).__name__, error_detail=str(error))
 
     async def generate(
         self,
