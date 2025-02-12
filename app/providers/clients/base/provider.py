@@ -3,6 +3,7 @@ from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
 from app.chat.models.message import ChatMessage
+from app.model_context_protocol.schemas.tools import MCPTool
 from app.providers.constants import ProviderType
 from app.providers.models import LLMProvider
 
@@ -59,6 +60,7 @@ class LLMProviderBase(ABC):
         top_p: float,
         messages: Sequence[ChatMessage] | None = None,
         session_id: UUID | None = None,
+        available_tools: Sequence[MCPTool] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using the provider in a streaming manner.

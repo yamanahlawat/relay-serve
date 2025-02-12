@@ -1,8 +1,8 @@
-from typing import AsyncGenerator, Sequence
+from typing import Any, AsyncGenerator, Sequence
 from uuid import UUID
 
 from langfuse.decorators import langfuse_context, observe
-from loguru import logger
+from mcp.types import EmbeddedResource, ImageContent, TextContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus, error_messages
@@ -12,8 +12,10 @@ from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageUsage
+from app.chat.schemas.stream import StreamBlockType
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
+from app.model_context_protocol.services.tool import MCPService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
 from app.providers.exceptions.client import ProviderAPIError, ProviderConnectionError, ProviderRateLimitError
@@ -34,6 +36,7 @@ class ChatCompletionService:
         self.db = db
         self.provider_factory = provider_factory
         self.message_service = ChatMessageService(db=self.db)
+        self.mcp_service = MCPService()
 
     async def validate_request(
         self,
@@ -212,19 +215,34 @@ class ChatCompletionService:
         full_content: str,
         params: CompletionParams,
         provider_client: LLMProviderBase,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
-        Finalize the assistant message by creating it and updating the Langfuse trace.
+        Finalize the assistant message with complete content and metadata.
         """
+
         input_tokens, output_tokens = provider_client.get_token_usage()
-        assistant_message = await self.create_assistant_message(
-            chat_session=chat_session,
-            content=full_content,
-            parent_id=message_id,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+
+        # Create message with usage metrics and metadata
+        assistant_message = await crud_message.create(
+            db=self.db,
+            session_id=chat_session.id,
+            obj_in=MessageCreate(
+                content=full_content,
+                role=MessageRole.ASSISTANT,
+                status=MessageStatus.COMPLETED,
+                parent_id=message_id,
+                usage=MessageUsage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    input_cost=input_tokens * model.input_cost_per_token,
+                    output_cost=output_tokens * model.output_cost_per_token,
+                ),
+                extra_data=metadata or {},
+            ),
         )
+
+        # Update Langfuse trace
         self.update_langfuse_trace(
             chat_session=chat_session,
             assistant_message=assistant_message,
@@ -238,6 +256,19 @@ class ChatCompletionService:
             },
         )
 
+    def _format_tool_content_for_display(self, content: list[TextContent | ImageContent | EmbeddedResource]) -> str:
+        """
+        Format tool content for display in chat
+        """
+        parts = []
+
+        for item in content:
+            if isinstance(item, TextContent):
+                parts.append(item.text)
+            else:
+                raise NotImplementedError("ImageContent and EmbeddedResource not supported yet")
+        return "\n".join(parts)
+
     @observe(name="streaming")
     async def generate_chat_stream(
         self,
@@ -250,65 +281,94 @@ class ChatCompletionService:
         """
         Generate streaming response.
         Ensures that if the stream ends without a final flag, the assistant message is still created.
+        Handles:
+        - Regular content streaming
+        - Tool execution and results
+        - Model thinking states
+        - Errors and completion states
+
+        Yields a formatted string representation of each state for the frontend.
         """
-        final_received = False
-        full_content = ""
+        full_content = []  # List to store all content parts
+        tool_outputs = []  # List to store tool results
 
         try:
-            # Get the message
-            current_message = await self.message_service.get_message(
-                session_id=chat_session.id,
-                message_id=message_id,
-            )
+            current_message = await self.message_service.get_message(session_id=chat_session.id, message_id=message_id)
 
-            history = await self.get_conversation_history(
-                chat_session=chat_session,
-                current_message_id=message_id,
-            )
-            model_params = self.get_model_params(model=model, request_params=params)
-            system_context = chat_session.system_context
+            history = await self.get_conversation_history(chat_session=chat_session, current_message_id=message_id)
 
-            async for chunk, is_final in provider_client.generate_stream(
+            available_tools = await self.mcp_service.get_available_tools()
+
+            async for block in provider_client.generate_stream(
                 current_message=current_message,
                 model=model.name,
-                system_context=system_context,
+                system_context=chat_session.system_context,
+                max_tokens=params.max_tokens,
+                temperature=params.temperature,
+                top_p=params.top_p,
                 messages=history,
-                **model_params,
+                session_id=chat_session.id,
+                available_tools=available_tools,
             ):
-                if chunk:
-                    full_content += chunk
-                    yield chunk
+                match block.type:
+                    case StreamBlockType.THINKING:
+                        # Show thinking/processing states
+                        yield f"_{block.content}_\n"
 
-                if is_final:
-                    final_received = True
-                    await self.finalize_assistant_message(
-                        chat_session=chat_session,
-                        message_id=message_id,
-                        model=model,
-                        current_message=current_message,
-                        full_content=full_content,
-                        params=params,
-                        provider_client=provider_client,
-                    )
-                    break
+                    case StreamBlockType.CONTENT:
+                        # Regular content
+                        full_content.append(block.content)
+                        yield block.content
+
+                    case StreamBlockType.TOOL_START:
+                        # Tool execution starting
+                        tool_msg = f"\n_Using tool: {block.tool_name}_\n"
+                        full_content.append(tool_msg)
+                        yield tool_msg
+
+                    case StreamBlockType.TOOL_CALL:
+                        # Tool being called with args
+                        tool_call_msg = f"```json\n{block.tool_args}\n```\n"
+                        full_content.append(tool_call_msg)
+                        yield tool_call_msg
+
+                    case StreamBlockType.TOOL_RESULT:
+                        if isinstance(block.content, list):
+                            formatted_content = self._format_tool_content_for_display(block.content)
+                            tool_result_msg = f"\n_Tool result from {block.tool_name}:_\n{formatted_content}\n"
+                        else:
+                            tool_result_msg = f"\n_Tool result from {block.tool_name}:_\n```\n{block.content}\n```\n"
+
+                        full_content.append(tool_result_msg)
+                        tool_outputs.append(
+                            {"tool_name": block.tool_name, "content": block.content, "call_id": block.tool_call_id}
+                        )
+                        yield tool_result_msg
+
+                    case StreamBlockType.ERROR:
+                        # Handle errors
+                        error_msg = f"\n**Error**: {block.error_detail}\n"
+                        full_content.append(error_msg)
+                        yield error_msg
+                        return
+
+                    case StreamBlockType.DONE:
+                        # Stream completion
+                        await self.finalize_assistant_message(
+                            chat_session=chat_session,
+                            message_id=message_id,
+                            model=model,
+                            current_message=current_message,
+                            full_content="".join(full_content),
+                            params=params,
+                            provider_client=provider_client,
+                            metadata={"tool_outputs": tool_outputs, **block.metadata},
+                        )
+                        break
 
         except Exception as error:
-            error_message = await self.handle_provider_error(error)
-            yield error_message
-            return
-
-        finally:
-            if not final_received and full_content:
-                logger.info("Did not receive final flag, finalizing assistant message")
-                await self.finalize_assistant_message(
-                    chat_session=chat_session,
-                    message_id=message_id,
-                    model=model,
-                    current_message=current_message,
-                    full_content=full_content,
-                    params=params,
-                    provider_client=provider_client,
-                )
+            error_msg = await self.handle_provider_error(error)
+            yield f"\n**System Error**: {error_msg}\n"
 
     @observe(name="non_streaming")
     async def generate_complete(

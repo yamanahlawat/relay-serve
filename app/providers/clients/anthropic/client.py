@@ -16,6 +16,7 @@ from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
 from app.chat.services.sse import get_sse_manager
 from app.files.image.processor import ImageProcessor
+from app.model_context_protocol.schemas.tools import MCPTool
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
 from app.providers.exceptions import (
@@ -89,6 +90,7 @@ class AnthropicProvider(LLMProviderBase):
         top_p: float,
         messages: Sequence[ChatMessage] | None = None,
         session_id: UUID | None = None,
+        available_tools: Sequence[MCPTool] | None = None,
     ) -> AsyncGenerator[tuple[str, bool], None]:
         """
         Generate streaming text using Anthropic Claude.

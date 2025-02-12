@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "pillow>=11.1.0",
     "pybase64>=1.4.0",
+    "mcp[cli]>=1.2.1",
 ]
 
 [dependency-groups]
@@ -33,4 +34,7 @@ dev = [
     "pre-commit>=4.1.0",
     "ruff>=0.9.5",
     "tomli-w>=1.2.0",
+]
+mcp-servers = [
+    "mcp-tavily>=0.1.2",
 ]
