@@ -1,5 +1,5 @@
 from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfig
-from app.model_context_protocol.registry import MCPServerRegistry
+from app.model_context_protocol.services.registry import MCPServerRegistry
 
 MCP_SERVERS = {
     "tavily-search": {
