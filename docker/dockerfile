@@ -18,6 +18,12 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Install the latest Node.js LTS version using NodeSource
+RUN wget -qO- https://deb.nodesource.com/setup_lts.x | bash - \
+&& apt-get install -y nodejs \
+&& apt-get clean \
+&& rm -rf /var/lib/apt/lists/*
+
 # Install uv
 RUN pip install uv
 

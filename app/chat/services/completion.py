@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Sequence
+from typing import Any, AsyncGenerator, Sequence
 from uuid import UUID
 
 from langfuse.decorators import langfuse_context, observe
@@ -275,7 +275,7 @@ class ChatCompletionService:
         provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
         params: CompletionParams,
         message_id: UUID,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict[str, Any] | Any | str, Any]:
         """
         Generate streaming response.
         Ensures that if the stream ends without a final flag, the assistant message is still created.
@@ -287,85 +287,43 @@ class ChatCompletionService:
 
         Yields a formatted string representation of each state for the frontend.
         """
-        full_content = []  # List to store all content parts
-        tool_outputs = []  # List to store tool results
+        current_message = await self.message_service.get_message(session_id=chat_session.id, message_id=message_id)
 
-        try:
-            current_message = await self.message_service.get_message(session_id=chat_session.id, message_id=message_id)
+        history = await self.get_conversation_history(chat_session=chat_session, current_message_id=message_id)
 
-            history = await self.get_conversation_history(chat_session=chat_session, current_message_id=message_id)
+        available_tools = await self.mcp_service.get_available_tools()
 
-            available_tools = await self.mcp_service.get_available_tools()
+        full_content = []  # Store all content for final message
 
-            async for block in provider_client.generate_stream(
-                current_message=current_message,
-                model=model.name,
-                system_context=chat_session.system_context,
-                max_tokens=params.max_tokens,
-                temperature=params.temperature,
-                top_p=params.top_p,
-                messages=history,
-                session_id=chat_session.id,
-                available_tools=available_tools,
-            ):
-                match block.type:
-                    case StreamBlockType.THINKING:
-                        # Show thinking/processing states
-                        yield f"_{block.content}_\n"
+        async for block in provider_client.generate_stream(
+            current_message=current_message,
+            model=model.name,
+            system_context=chat_session.system_context,
+            max_tokens=params.max_tokens,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            messages=history,
+            session_id=chat_session.id,
+            available_tools=available_tools,
+        ):
+            # Accumulate content blocks for final message
+            if block.type == StreamBlockType.CONTENT and isinstance(block.content, str):
+                full_content.append(block.content)
 
-                    case StreamBlockType.CONTENT:
-                        # Regular content
-                        full_content.append(block.content)
-                        yield block.content
+            # Yield the block to the client
+            yield block.model_dump_json(exclude_unset=True)
 
-                    case StreamBlockType.TOOL_START:
-                        # Tool execution starting
-                        tool_msg = f"\n_Using tool: {block.tool_name}_\n"
-                        full_content.append(tool_msg)
-                        yield tool_msg
-
-                    case StreamBlockType.TOOL_CALL:
-                        # Tool being called with args
-                        tool_call_msg = f"```json\n{block.tool_args}\n```\n"
-                        full_content.append(tool_call_msg)
-                        yield tool_call_msg
-
-                    case StreamBlockType.TOOL_RESULT:
-                        if isinstance(block.content, list):
-                            formatted_content = self._format_tool_content_for_display(block.content)
-                            tool_result_msg = f"\n_Tool result from {block.tool_name}:_\n{formatted_content}\n"
-                        else:
-                            tool_result_msg = f"\n_Tool result from {block.tool_name}:_\n```\n{block.content}\n```\n"
-
-                        full_content.append(tool_result_msg)
-                        tool_outputs.append(
-                            {"tool_name": block.tool_name, "content": block.content, "call_id": block.tool_call_id}
-                        )
-                        yield tool_result_msg
-
-                    case StreamBlockType.ERROR:
-                        # Handle errors
-                        error_msg = f"\n**Error**: {block.error_detail}\n"
-                        full_content.append(error_msg)
-                        yield error_msg
-                        return
-
-                    case StreamBlockType.DONE:
-                        # Stream completion
-                        await self.finalize_assistant_message(
-                            chat_session=chat_session,
-                            message_id=message_id,
-                            model=model,
-                            current_message=current_message,
-                            full_content="".join(full_content),
-                            params=params,
-                            provider_client=provider_client,
-                        )
-                        break
-
-        except Exception as error:
-            error_msg = await self.handle_provider_error(error)
-            yield f"\n**System Error**: {error_msg}\n"
+            # Finalize on completion
+            if block.type == StreamBlockType.DONE:
+                await self.finalize_assistant_message(
+                    chat_session=chat_session,
+                    message_id=message_id,
+                    model=model,
+                    current_message=current_message,
+                    full_content="".join(full_content),
+                    params=params,
+                    provider_client=provider_client,
+                )
 
     @observe(name="non_streaming")
     async def generate_complete(

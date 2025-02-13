@@ -47,16 +47,6 @@ class MCPServerManager:
             logger.exception(f"Failed to start MCP server {server_name}")
             raise MCPServerError(f"Failed to start server: {error}")
 
-    async def stop_server(self, name: str) -> None:
-        """
-        Stop an MCP server.
-        """
-        session = self._sessions.get(name)
-        if session:
-            await self.exit_stack.aclose()
-            del self._sessions[name]
-            logger.info(f"Stopped MCP server {name}")
-
     async def get_session(self, name: str) -> Optional[ClientSession]:
         """
         Get the session for a server if it exists.

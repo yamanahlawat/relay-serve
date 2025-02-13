@@ -51,7 +51,7 @@ def get_attachment_download_url(storage_path: str) -> str:
         # "/uploads/8a540b73-.../ba194f98-da60-44a9-.../filename"
         # The endpoint URL becomes:
         # {BASE_URL}{API_URL}/v1/attachments/<folder>/<filename>
-        return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments{storage_path}"
+        return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments{storage_path}/"
     elif settings.STORAGE_PROVIDER == StorageProvider.S3:
         raise NotImplementedError("S3 URL generation not yet implemented")
     else:

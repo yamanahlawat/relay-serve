@@ -17,6 +17,7 @@ from app.chat.models import ChatMessage
 from app.chat.schemas.stream import StreamBlock
 from app.chat.services.stream import StreamBlockFactory
 from app.files.image.processor import ImageProcessor
+from app.model_context_protocol.exceptions import MCPToolError
 from app.model_context_protocol.schemas.tools import MCPTool
 from app.providers.clients.base import LLMProviderBase
 from app.providers.clients.openai.stream import OpenAIStreamHandler
@@ -157,125 +158,123 @@ class OpenAIProvider(LLMProviderBase):
             # Format tools if available
             tools_payload = self.tool_handler.format_tools(tools=available_tools) if available_tools else None
 
-            stream = await self.stream_handler.create_completion_stream(
-                model=model,
-                messages=formatted_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                tools=tools_payload,
-            )
-
-            current_tool_calls: dict[str, dict] = {}
-            current_tool_index: dict[int, str] = {}
-            current_content = ""
+            # Initialize conversation messages with the formatted history
             conversation_messages = formatted_messages.copy()
 
-            async for chunk in stream:
-                if await self.stream_handler.should_cancel(session_id):
-                    yield StreamBlockFactory.create_content_block(content="Request cancelled")
-                    await stream.close()
-                    break
-
-                # Handle regular content
-                if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
-                    current_content += content
-                    yield StreamBlockFactory.create_content_block(content=content)
-
-                # Check for completion/usage
-                usage, should_stop = self.stream_handler.handle_completion(chunk)
-                if usage:
-                    self._last_usage = usage
-                if should_stop:
-                    yield StreamBlockFactory.create_done_block()
-                    break
-
-                if not chunk.choices:
-                    continue
-
-                delta = chunk.choices[0].delta
-
-                # Handle tool calls
-                tool_calls, tool_index, tool_block = self.stream_handler.handle_tool_calls(
-                    delta=delta,
-                    current_tool_calls=current_tool_calls,
-                    current_tool_index=current_tool_index,
+            while True:  # Continue until all tool calls are processed
+                stream = await self.stream_handler.create_completion_stream(
+                    model=model,
+                    messages=conversation_messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    tools=tools_payload,
                 )
-                current_tool_calls = tool_calls
-                current_tool_index = tool_index
-                if tool_block:
-                    yield tool_block
 
-                # Handle tool execution
-                if chunk.choices[0].finish_reason == "tool_calls":
-                    for tool_id, tool_call in current_tool_calls.items():
-                        try:
-                            parsed_args = json.loads(tool_call["arguments"])
+                current_tool_calls: dict[str, dict] = {}
+                current_tool_index: dict[int, str] = {}
+                has_tool_calls = False
 
-                            yield StreamBlockFactory.create_tool_call_block(
-                                tool_name=tool_call["name"],
-                                tool_args=parsed_args,
-                                tool_call_id=tool_id,
-                            )
+                async for chunk in stream:
+                    if await self.stream_handler.should_cancel(session_id):
+                        yield StreamBlockFactory.create_content_block(content="Request cancelled")
+                        await stream.close()
+                        return
 
-                            tool_result = await self.tool_handler.execute_tool(
-                                name=tool_call["name"],
-                                arguments=parsed_args,
-                                call_id=tool_id,
-                            )
+                    # Handle regular content
+                    if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
+                        yield StreamBlockFactory.create_content_block(content=content)
 
-                            # Format tool result
-                            formatted_result = self.tool_handler.format_tool_result(tool_result.content)
+                    # Check for completion/usage
+                    usage, should_stop = self.stream_handler.handle_completion(chunk)
+                    if usage:
+                        self._last_usage = usage
+                    if should_stop and not has_tool_calls:
+                        yield StreamBlockFactory.create_done_block()
+                        return
 
-                            # Update messages with tool results
-                            conversation_messages.extend(
-                                self.tool_handler.format_tool_messages(
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta
+
+                    # Handle tool calls
+                    tool_calls, tool_index, tool_block = self.stream_handler.handle_tool_calls(
+                        delta=delta,
+                        current_tool_calls=current_tool_calls,
+                        current_tool_index=current_tool_index,
+                    )
+                    current_tool_calls = tool_calls
+                    current_tool_index = tool_index
+                    if tool_block:
+                        yield tool_block
+
+                    # Process tool calls one at a time
+                    if chunk.choices[0].finish_reason == "tool_calls":
+                        has_tool_calls = True
+                        for tool_id, tool_call in current_tool_calls.items():
+                            try:
+                                parsed_args = json.loads(tool_call["arguments"])
+
+                                yield StreamBlockFactory.create_tool_call_block(
+                                    tool_name=tool_call["name"],
+                                    tool_args=parsed_args,
+                                    tool_call_id=tool_id,
+                                )
+
+                                tool_result = await self.tool_handler.execute_tool(
+                                    name=tool_call["name"],
+                                    arguments=parsed_args,
+                                    call_id=tool_id,
+                                )
+
+                                formatted_result = self.tool_handler.format_tool_result(tool_result.content)
+
+                                # Add this tool's messages to conversation
+                                tool_messages = self.tool_handler.format_tool_messages(
                                     tool_call=tool_call,
                                     result=formatted_result,
                                 )
-                            )
+                                conversation_messages.extend(tool_messages)
 
-                            yield StreamBlockFactory.create_tool_result_block(
-                                content=tool_result.content,
-                                tool_call_id=tool_id,
-                                tool_name=tool_call["name"],
-                            )
+                                yield StreamBlockFactory.create_tool_result_block(
+                                    content=tool_result.content,
+                                    tool_call_id=tool_id,
+                                    tool_name=tool_call["name"],
+                                )
 
-                            yield StreamBlockFactory.create_thinking_block(
-                                content=f"Processing {tool_call['name']} results..."
-                            )
+                                yield StreamBlockFactory.create_thinking_block(
+                                    content=f"Processing {tool_call['name']} results..."
+                                )
 
-                        except Exception as tool_error:
-                            yield StreamBlockFactory.create_error_block(
-                                error_type="tool_execution_error",
-                                error_detail=str(tool_error),
-                            )
+                                break
 
-                    # Continue stream with tool results
-                    yield StreamBlockFactory.create_thinking_block(content="Continuing with tool results...")
+                            except json.JSONDecodeError as e:
+                                yield StreamBlockFactory.create_error_block(
+                                    error_type="tool_argument_error",
+                                    error_detail=f"Invalid tool arguments format: {str(e)}",
+                                )
+                                continue
 
-                    continue_stream = await self.stream_handler.create_completion_stream(
-                        model=model,
-                        messages=conversation_messages,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        top_p=top_p,
-                        tools=tools_payload,
-                    )
+                            except MCPToolError as e:
+                                yield StreamBlockFactory.create_error_block(
+                                    error_type="tool_execution_error", error_detail=f"Tool execution failed: {str(e)}"
+                                )
+                                continue
 
-                    async for cont_chunk in continue_stream:
-                        # Process content from delta
-                        if cont_chunk.choices and (content := getattr(cont_chunk.choices[0].delta, "content", None)):
-                            current_content += content
-                            yield StreamBlockFactory.create_content_block(content=content)
+                            except Exception as e:
+                                yield StreamBlockFactory.create_error_block(
+                                    error_type="tool_error",
+                                    error_detail=f"Unexpected error during tool execution: {str(e)}",
+                                )
+                                continue
 
-                        # Check for completion/usage
-                        usage, should_stop = self.stream_handler.handle_completion(cont_chunk)
-                        if usage:
-                            self._last_usage = usage
-                        if should_stop:
-                            yield StreamBlockFactory.create_done_block()
-                            break
+                        break
+
+                if not has_tool_calls:
+                    break
+
+            yield StreamBlockFactory.create_done_block()
 
         except Exception as error:
             logger.exception("Error in generate_stream")

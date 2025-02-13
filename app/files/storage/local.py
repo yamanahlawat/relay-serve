@@ -96,4 +96,4 @@ class LocalStorage(StorageBackend):
             raise FileNotFoundError(f"File '{original_filename}' not found in folder '{folder}'.")
         filename = file_path.name
         # Build URL: e.g. "http://localhost:8000/api/v1/attachments/<folder>/<filename>"
-        return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments/{folder}/{filename}"
+        return f"{str(settings.BASE_URL).rstrip('/')}{settings.API_URL}/v1/attachments/{folder}/{filename}/"
