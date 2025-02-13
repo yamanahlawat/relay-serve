@@ -19,6 +19,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Start enabled MCP servers
     await mcp_registry.start_enabled_servers()
     yield
+    # Stop all running MCP servers
+    await mcp_registry.shutdown()
     # Get the SSE manager instance
     manager = await get_sse_manager()
     # Clean up Redis connections
