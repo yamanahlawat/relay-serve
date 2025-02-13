@@ -2,8 +2,8 @@ from loguru import logger
 from mcp import ClientSession
 
 from app.model_context_protocol.exceptions import MCPServerNotFoundError
-from app.model_context_protocol.services.manager import MCPServerManager
 from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfig
+from app.model_context_protocol.services.manager import MCPServerManager
 
 
 class MCPServerRegistry:
@@ -66,12 +66,6 @@ class MCPServerRegistry:
         Get all currently running servers.
         """
         return await self.manager.list_sessions()
-
-    async def stop_server(self, name: str) -> None:
-        """
-        Stop a specific server.
-        """
-        await self.manager.stop_server(name=name)
 
     async def shutdown(self) -> None:
         """

@@ -81,7 +81,8 @@ class SSEConnectionManager:
                 if not await self.redis.exists(session_key):
                     break
                 await self.redis.publish(pubsub_channel, chunk)
-                yield chunk
+                # Format as proper SSE data
+                yield f"data: {chunk}\n\n"
 
         except Exception as error:
             response = StreamResponse(event=StreamEvent.ERROR, error=str(error))
