@@ -58,3 +58,24 @@ class StreamBlock(BaseModel):
     # Error details
     error_type: str | None = None
     error_detail: str | None = None
+
+
+class ToolExecution(BaseModel):
+    """
+    Represents a single tool execution during chat completion
+    """
+
+    id: str
+    name: str
+    arguments: str | dict
+    result: str | dict | None = None
+    error: str | None = None
+
+
+class CompletionMetadata(BaseModel):
+    """
+    Final metadata for a chat completion
+    """
+
+    tool_executions: list[ToolExecution] = []
+    content: str = ""
