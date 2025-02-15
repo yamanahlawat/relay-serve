@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Tuple
 from uuid import UUID
 
@@ -5,9 +6,7 @@ from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionChunk
 
-from app.chat.schemas.stream import StreamBlock
 from app.chat.services.sse import get_sse_manager
-from app.chat.services.stream import StreamBlockFactory
 
 
 class OpenAIStreamHandler:
@@ -62,7 +61,7 @@ class OpenAIStreamHandler:
         delta: Any,
         current_tool_calls: dict[str, dict],
         current_tool_index: dict[int, str],
-    ) -> Tuple[dict[str, dict], dict[int, str], StreamBlock | None]:
+    ) -> Tuple:
         """
         Process tool calls from a chunk delta.
         Args:
@@ -75,32 +74,32 @@ class OpenAIStreamHandler:
         if not (tool_calls := getattr(delta, "tool_calls", [])):
             return current_tool_calls, current_tool_index, None
 
+        new_tool_event = None
         for tool_call in tool_calls:
             # Get existing tool_id from index if this is a continuation
             tool_id = tool_call.id or current_tool_index.get(tool_call.index)
 
             if tool_id and tool_id not in current_tool_calls:
                 # This is a new tool call
-                current_tool_calls[tool_id] = {
+                new_event = {
                     "id": tool_id,
                     "name": tool_call.function.name,
                     "arguments": tool_call.function.arguments or "",
-                    "type": tool_call.type or "function",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
+                current_tool_calls[tool_id] = new_event
                 current_tool_index[tool_call.index] = tool_id
-
+                new_tool_event = new_event
                 # Only emit thinking block if we have the tool name
                 if tool_call.function.name:
                     return (
                         current_tool_calls,
                         current_tool_index,
-                        StreamBlockFactory.create_thinking_block(
-                            content=f"Preparing to use tool: {tool_call.function.name}"
-                        ),
+                        new_tool_event,
                     )
             elif tool_id and tool_call.function.arguments:
                 # Accumulate arguments for existing tool call
-                current_tool_calls[tool_id]["arguments"] += tool_call.function.arguments
+                current_tool_calls[tool_id].arguments += tool_call.function.arguments
 
         return current_tool_calls, current_tool_index, None
 

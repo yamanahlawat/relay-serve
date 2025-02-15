@@ -85,6 +85,7 @@ class Settings(BaseSettings):
 
     # Sentry Configuration
     SENTRY_DSN: HttpUrl | None = None
+    SENTRY_AUTH_TOKEN: SecretStr | None = None
 
     # Langfuse Configuration
     LANGFUSE_HOST: str | None = "http://langfuse:3000"

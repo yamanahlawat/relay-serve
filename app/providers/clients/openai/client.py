@@ -14,8 +14,8 @@ from openai import (
 
 from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
-from app.chat.schemas.stream import StreamBlock
-from app.chat.services.stream import StreamBlockFactory
+from app.chat.schemas.stream import CompletionMetadata, StreamBlock, ToolExecution
+from app.chat.services.stream_block_factory import StreamBlockFactory
 from app.files.image.processor import ImageProcessor
 from app.model_context_protocol.exceptions import MCPToolError
 from app.model_context_protocol.schemas.tools import MCPTool
@@ -141,13 +141,18 @@ class OpenAIProvider(LLMProviderBase):
         messages: Sequence[ChatMessage] | None = None,
         session_id: UUID | None = None,
         available_tools: Sequence[MCPTool] | None = None,
-    ) -> AsyncGenerator[StreamBlock, None]:
+    ) -> AsyncGenerator[tuple[StreamBlock, CompletionMetadata | None], None]:
         """
         Generate streaming text using OpenAI with integrated tool calling.
         """
         try:
+            # Initialize completion metadata and content collection
+            completion_metadata = CompletionMetadata()
+            content_chunks: list[str] = []
+            current_tool_calls: dict[str, ToolExecution] = {}
+
             # Signal initial thinking state
-            yield StreamBlockFactory.create_thinking_block(content="Thinking...")
+            yield StreamBlockFactory.create_thinking_block(content="Thinking..."), None
 
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
@@ -171,26 +176,28 @@ class OpenAIProvider(LLMProviderBase):
                     tools=tools_payload,
                 )
 
-                current_tool_calls: dict[str, dict] = {}
                 current_tool_index: dict[int, str] = {}
                 has_tool_calls = False
 
                 async for chunk in stream:
                     if await self.stream_handler.should_cancel(session_id):
-                        yield StreamBlockFactory.create_content_block(content="Request cancelled")
+                        yield StreamBlockFactory.create_content_block(content="Request cancelled"), None
                         await stream.close()
                         return
 
                     # Handle regular content
                     if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
-                        yield StreamBlockFactory.create_content_block(content=content)
+                        content_chunks.append(content)
+                        yield StreamBlockFactory.create_content_block(content=content), None
 
                     # Check for completion/usage
                     usage, should_stop = self.stream_handler.handle_completion(chunk)
                     if usage:
                         self._last_usage = usage
                     if should_stop and not has_tool_calls:
-                        yield StreamBlockFactory.create_done_block()
+                        completion_metadata.content = "".join(content_chunks)
+                        completion_metadata.tool_executions = list(current_tool_calls.values())
+                        yield StreamBlockFactory.create_done_block(), completion_metadata
                         return
 
                     if not chunk.choices:
@@ -199,36 +206,61 @@ class OpenAIProvider(LLMProviderBase):
                     delta = chunk.choices[0].delta
 
                     # Handle tool calls
-                    tool_calls, tool_index, tool_block = self.stream_handler.handle_tool_calls(
+                    tool_calls, tool_index, tool_event = self.stream_handler.handle_tool_calls(
                         delta=delta,
                         current_tool_calls=current_tool_calls,
                         current_tool_index=current_tool_index,
                     )
-                    current_tool_calls = tool_calls
+
                     current_tool_index = tool_index
-                    if tool_block:
-                        yield tool_block
+
+                    # Handle new tool event
+                    if tool_event:
+                        tool_execution = ToolExecution(
+                            id=tool_event["id"],
+                            name=tool_event["name"],
+                            arguments=tool_event["arguments"],
+                        )
+                        current_tool_calls[tool_event["id"]] = tool_execution
+
+                        yield (
+                            StreamBlockFactory.create_tool_start_block(
+                                tool_name=tool_event["name"], tool_call_id=tool_event["id"]
+                            ),
+                            None,
+                        )
 
                     # Process tool calls one at a time
                     if chunk.choices[0].finish_reason == "tool_calls":
                         has_tool_calls = True
-                        for tool_id, tool_call in current_tool_calls.items():
+                        for tool_id, tool_call in tool_calls.items():
                             try:
-                                parsed_args = json.loads(tool_call["arguments"])
+                                parsed_args = json.loads(tool_call.arguments)
 
-                                yield StreamBlockFactory.create_tool_call_block(
-                                    tool_name=tool_call["name"],
-                                    tool_args=parsed_args,
-                                    tool_call_id=tool_id,
+                                # Update tool execution with parsed arguments
+                                if tool_id in current_tool_calls:
+                                    current_tool_calls[tool_id].arguments = parsed_args
+
+                                yield (
+                                    StreamBlockFactory.create_tool_call_block(
+                                        tool_name=tool_call.name,
+                                        tool_args=parsed_args,
+                                        tool_call_id=tool_id,
+                                    ),
+                                    None,
                                 )
 
                                 tool_result = await self.tool_handler.execute_tool(
-                                    name=tool_call["name"],
+                                    name=tool_call.name,
                                     arguments=parsed_args,
                                     call_id=tool_id,
                                 )
 
                                 formatted_result = self.tool_handler.format_tool_result(tool_result.content)
+
+                                # Update tool execution with result
+                                if tool_id in current_tool_calls:
+                                    current_tool_calls[tool_id].result = formatted_result
 
                                 # Add this tool's messages to conversation
                                 tool_messages = self.tool_handler.format_tool_messages(
@@ -237,35 +269,47 @@ class OpenAIProvider(LLMProviderBase):
                                 )
                                 conversation_messages.extend(tool_messages)
 
-                                yield StreamBlockFactory.create_tool_result_block(
-                                    content=tool_result.content,
-                                    tool_call_id=tool_id,
-                                    tool_name=tool_call["name"],
+                                yield (
+                                    StreamBlockFactory.create_tool_result_block(
+                                        content=tool_result.content,
+                                        tool_call_id=tool_id,
+                                        tool_name=tool_call.name,
+                                    ),
+                                    None,
                                 )
 
-                                yield StreamBlockFactory.create_thinking_block(
-                                    content=f"Processing {tool_call['name']} results..."
+                                yield (
+                                    StreamBlockFactory.create_thinking_block(
+                                        content=f"Processing {tool_call.name} results..."
+                                    ),
+                                    None,
                                 )
 
                                 break
 
                             except json.JSONDecodeError as e:
-                                yield StreamBlockFactory.create_error_block(
-                                    error_type="tool_argument_error",
-                                    error_detail=f"Invalid tool arguments format: {str(e)}",
+                                error_msg = f"Invalid tool arguments format: {str(e)}"
+                                if tool_id in current_tool_calls:
+                                    current_tool_calls[tool_id].error = error_msg
+                                yield (
+                                    StreamBlockFactory.create_error_block(
+                                        error_type="tool_argument_error",
+                                        error_detail=error_msg,
+                                    ),
+                                    None,
                                 )
                                 continue
 
                             except MCPToolError as e:
-                                yield StreamBlockFactory.create_error_block(
-                                    error_type="tool_execution_error", error_detail=f"Tool execution failed: {str(e)}"
-                                )
-                                continue
-
-                            except Exception as e:
-                                yield StreamBlockFactory.create_error_block(
-                                    error_type="tool_error",
-                                    error_detail=f"Unexpected error during tool execution: {str(e)}",
+                                error_msg = f"Tool execution failed: {str(e)}"
+                                if tool_id in current_tool_calls:
+                                    current_tool_calls[tool_id].error = error_msg
+                                yield (
+                                    StreamBlockFactory.create_error_block(
+                                        error_type="tool_execution_error",
+                                        error_detail=error_msg,
+                                    ),
+                                    None,
                                 )
                                 continue
 
@@ -274,13 +318,19 @@ class OpenAIProvider(LLMProviderBase):
                 if not has_tool_calls:
                     break
 
-            yield StreamBlockFactory.create_done_block()
+            # Final yield with completion metadata
+            completion_metadata.content = "".join(content_chunks)
+            completion_metadata.tool_executions = list(current_tool_calls.values())
+            yield StreamBlockFactory.create_done_block(), completion_metadata
 
         except Exception as error:
             logger.exception("Error in generate_stream")
-            yield StreamBlockFactory.create_error_block(
-                error_type=type(error).__name__,
-                error_detail=str(error),
+            yield (
+                StreamBlockFactory.create_error_block(
+                    error_type=type(error).__name__,
+                    error_detail=str(error),
+                ),
+                None,
             )
 
     async def generate(

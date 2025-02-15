@@ -12,7 +12,6 @@ from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageUsage
-from app.chat.schemas.stream import StreamBlockType
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
 from app.model_context_protocol.services.tool import MCPToolService
@@ -215,6 +214,7 @@ class ChatCompletionService:
         full_content: str,
         params: CompletionParams,
         provider_client: LLMProviderBase,
+        extra_data: dict[str, Any] | None = None,
     ) -> None:
         """
         Finalize the assistant message with complete content and metadata.
@@ -237,6 +237,7 @@ class ChatCompletionService:
                     input_cost=input_tokens * model.input_cost_per_token,
                     output_cost=output_tokens * model.output_cost_per_token,
                 ),
+                extra_data=extra_data or {},
             ),
         )
 
@@ -287,15 +288,19 @@ class ChatCompletionService:
 
         Yields a formatted string representation of each state for the frontend.
         """
-        current_message = await self.message_service.get_message(session_id=chat_session.id, message_id=message_id)
+        current_message = await self.message_service.get_message(
+            session_id=chat_session.id,
+            message_id=message_id,
+        )
 
-        history = await self.get_conversation_history(chat_session=chat_session, current_message_id=message_id)
+        history = await self.get_conversation_history(
+            chat_session=chat_session,
+            current_message_id=message_id,
+        )
 
         available_tools = await self.mcp_service.get_available_tools()
 
-        full_content = []  # Store all content for final message
-
-        async for block in provider_client.generate_stream(
+        async for block, metadata in provider_client.generate_stream(
             current_message=current_message,
             model=model.name,
             system_context=chat_session.system_context,
@@ -306,23 +311,23 @@ class ChatCompletionService:
             session_id=chat_session.id,
             available_tools=available_tools,
         ):
-            # Accumulate content blocks for final message
-            if block.type == StreamBlockType.CONTENT and isinstance(block.content, str):
-                full_content.append(block.content)
-
-            # Yield the block to the client
+            # Send block to client
             yield block.model_dump_json(exclude_unset=True)
 
-            # Finalize on completion
-            if block.type == StreamBlockType.DONE:
+            # Store metadata if received
+            if metadata:
+                # Create final message with metadata
                 await self.finalize_assistant_message(
                     chat_session=chat_session,
                     message_id=message_id,
                     model=model,
                     current_message=current_message,
-                    full_content="".join(full_content),
+                    full_content=metadata.content,
                     params=params,
                     provider_client=provider_client,
+                    extra_data={
+                        "tool_executions": [tool.model_dump_json() for tool in metadata.tool_executions],
+                    },
                 )
 
     @observe(name="non_streaming")
