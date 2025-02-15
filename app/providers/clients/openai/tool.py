@@ -1,7 +1,9 @@
+import json
 from typing import Any, Sequence
 
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
+from app.chat.schemas.stream import ToolExecution
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
 from app.model_context_protocol.services.tool import MCPToolService
 from app.providers.clients.openai.schemas import OpenAIFunction, OpenAIFunctionParameters, OpenAITool
@@ -43,7 +45,7 @@ class OpenAIToolHandler:
 
     def format_tool_messages(
         self,
-        tool_call: dict[str, Any],
+        tool_call: ToolExecution,
         result: str,
     ) -> list[dict[str, Any]]:
         """Format tool call and result as messages."""
@@ -53,11 +55,11 @@ class OpenAIToolHandler:
                 "content": None,
                 "tool_calls": [
                     {
-                        "id": tool_call["id"],
+                        "id": tool_call.id,
                         "type": "function",
                         "function": {
-                            "name": tool_call["name"],
-                            "arguments": tool_call["arguments"],
+                            "name": tool_call.name,
+                            "arguments": json.dumps(tool_call.arguments),
                         },
                     }
                 ],
@@ -65,7 +67,7 @@ class OpenAIToolHandler:
             {
                 "role": "tool",
                 "content": result,
-                "tool_call_id": tool_call["id"],
+                "tool_call_id": tool_call.id,
             },
         ]
 
