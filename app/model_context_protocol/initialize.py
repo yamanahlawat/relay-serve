@@ -20,6 +20,7 @@ MCP_SERVERS = {
             "--auth-token",
             settings.SENTRY_AUTH_TOKEN.get_secret_value(),
         ],
+        "enabled": False,
     },
 }
 

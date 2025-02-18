@@ -49,7 +49,9 @@ class OpenAIProvider(LLMProviderBase):
         self.stream_handler = OpenAIStreamHandler(client=self._client)
 
     def _handle_api_error(self, error: APIError) -> None:
-        """Handle OpenAI API errors and raise appropriate provider exceptions."""
+        """
+        Handle OpenAI API errors and raise appropriate provider exceptions.
+        """
         if isinstance(error, APIConnectionError):
             logger.exception("OpenAI API connection error during generation")
             raise ProviderConnectionError(
@@ -86,7 +88,9 @@ class OpenAIProvider(LLMProviderBase):
             ) from error
 
     def _format_message_content(self, message: ChatMessage, is_current: bool = False) -> list[dict]:
-        """Format message content with any image attachments."""
+        """
+        Format message content with any image attachments.
+        """
         # Add text content
         content = [{"type": "text", "text": message.content}]
 
@@ -111,7 +115,9 @@ class OpenAIProvider(LLMProviderBase):
         current_message: ChatMessage,
         system_context: str,
     ) -> list[dict[str, str]]:
-        """Prepare message history for OpenAI API."""
+        """
+        Prepare message history for OpenAI API.
+        """
         formatted_messages = []
 
         if system_context:
@@ -146,13 +152,13 @@ class OpenAIProvider(LLMProviderBase):
         Generate streaming text using OpenAI with integrated tool calling.
         """
         try:
+            # Signal initial thinking state
+            yield StreamBlockFactory.create_thinking_block(), None
+
             # Initialize completion metadata and content collection
             completion_metadata = CompletionMetadata()
             content_chunks: list[str] = []
             current_tool_calls: dict[str, ToolExecution] = {}
-
-            # Signal initial thinking state
-            yield StreamBlockFactory.create_thinking_block(content="Thinking..."), None
 
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
@@ -181,7 +187,13 @@ class OpenAIProvider(LLMProviderBase):
 
                 async for chunk in stream:
                     if await self.stream_handler.should_cancel(session_id):
-                        yield StreamBlockFactory.create_content_block(content="Request cancelled"), None
+                        yield (
+                            StreamBlockFactory.create_error_block(
+                                error_type="request_cancelled",
+                                error_detail="Streaming cancelled by User",
+                            ),
+                            None,
+                        )
                         await stream.close()
                         return
 
@@ -225,7 +237,8 @@ class OpenAIProvider(LLMProviderBase):
 
                         yield (
                             StreamBlockFactory.create_tool_start_block(
-                                tool_name=tool_event["name"], tool_call_id=tool_event["id"]
+                                tool_name=tool_event["name"],
+                                tool_call_id=tool_event["id"],
                             ),
                             None,
                         )
@@ -250,6 +263,7 @@ class OpenAIProvider(LLMProviderBase):
                                     None,
                                 )
 
+                                # Execute the tool call
                                 tool_result = await self.tool_handler.execute_tool(
                                     name=tool_call.name,
                                     arguments=parsed_args,
@@ -271,7 +285,7 @@ class OpenAIProvider(LLMProviderBase):
 
                                 yield (
                                     StreamBlockFactory.create_tool_result_block(
-                                        content=tool_result.content,
+                                        tool_result=tool_result.content,
                                         tool_call_id=tool_id,
                                         tool_name=tool_call.name,
                                     ),
@@ -284,9 +298,7 @@ class OpenAIProvider(LLMProviderBase):
                                     ),
                                     None,
                                 )
-
-                                break
-
+                                # Continue processing remaining tool calls without breaking
                             except json.JSONDecodeError as e:
                                 error_msg = f"Invalid tool arguments format: {str(e)}"
                                 if tool_id in current_tool_calls:
@@ -381,7 +393,9 @@ class OpenAIProvider(LLMProviderBase):
             self._handle_api_error(error)
 
     def get_token_usage(self) -> tuple[int, int]:
-        """Get token usage from the last operation."""
+        """
+        Get token usage from the last operation.
+        """
         return self._last_usage if self._last_usage else (0, 0)
 
 

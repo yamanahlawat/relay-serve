@@ -4,6 +4,8 @@ from typing import Any
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 from pydantic import BaseModel
 
+from app.chat.schemas.message import MessageRead
+
 
 class StreamEvent(str, Enum):
     """
@@ -43,21 +45,29 @@ class StreamBlockType(str, Enum):
 
 class StreamBlock(BaseModel):
     """
-    Base model for stream blocks
+    Base model for different types of stream blocks.
+    - For thinking/content blocks: use 'content' field
+    - For tool blocks: use tool_* fields
+    - For errors: use error_* fields
     """
 
     type: StreamBlockType
-    content: str | list[TextContent | ImageContent | EmbeddedResource] | None = None
 
-    # Tool specific fields
+    # Used for thinking and regular content blocks
+    content: str | None = None
+
+    # Tool-specific fields
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_call_id: str | None = None
-    tool_status: str | None = None
+    tool_result: list[TextContent | ImageContent | EmbeddedResource] | None = None
 
-    # Error details
+    # Error handling
     error_type: str | None = None
     error_detail: str | None = None
+
+    # Final message
+    message: MessageRead | None = None
 
 
 class ToolExecution(BaseModel):
