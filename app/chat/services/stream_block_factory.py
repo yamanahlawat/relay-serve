@@ -42,7 +42,6 @@ class StreamBlockFactory:
             type=StreamBlockType.TOOL_START,
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            content=f"Starting tool: {tool_name}",
         )
 
     @staticmethod
@@ -59,23 +58,19 @@ class StreamBlockFactory:
             tool_name=tool_name,
             tool_args=tool_args,
             tool_call_id=tool_call_id,
-            content=f"Calling tool: {tool_name}",
         )
 
     @staticmethod
     def create_tool_result_block(
-        content: str | list[TextContent | ImageContent | EmbeddedResource],
+        tool_result: list[TextContent | ImageContent | EmbeddedResource],
         tool_call_id: str,
-        tool_name: str | None = None,
+        tool_name: str,
     ) -> StreamBlock:
         """
         Create a block containing tool execution results
         """
         return StreamBlock(
-            type=StreamBlockType.TOOL_RESULT,
-            content=content,
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
+            type=StreamBlockType.TOOL_RESULT, tool_name=tool_name, tool_call_id=tool_call_id, tool_result=tool_result
         )
 
     @staticmethod

@@ -2,7 +2,6 @@ from typing import Any, AsyncGenerator, Sequence
 from uuid import UUID
 
 from langfuse.decorators import langfuse_context, observe
-from mcp.types import EmbeddedResource, ImageContent, TextContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus, error_messages
@@ -11,7 +10,7 @@ from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
 from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
 from app.chat.schemas.common import ChatUsage
-from app.chat.schemas.message import MessageUsage
+from app.chat.schemas.message import MessageRead, MessageUsage
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
 from app.model_context_protocol.services.tool import MCPToolService
@@ -215,7 +214,7 @@ class ChatCompletionService:
         params: CompletionParams,
         provider_client: LLMProviderBase,
         extra_data: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> ChatMessage:
         """
         Finalize the assistant message with complete content and metadata.
         """
@@ -254,19 +253,7 @@ class ChatCompletionService:
                 "top_p": params.top_p,
             },
         )
-
-    def _format_tool_content_for_display(self, content: list[TextContent | ImageContent | EmbeddedResource]) -> str:
-        """
-        Format tool content for display in chat
-        """
-        parts = []
-
-        for item in content:
-            if isinstance(item, TextContent):
-                parts.append(item.text)
-            else:
-                raise NotImplementedError("ImageContent and EmbeddedResource not supported yet")
-        return "\n".join(parts)
+        return assistant_message
 
     @observe(name="streaming")
     async def generate_chat_stream(
@@ -312,23 +299,38 @@ class ChatCompletionService:
             available_tools=available_tools,
         ):
             # Send block to client
-            yield block.model_dump_json(exclude_unset=True)
+            if block.type == "done":
+                # Store metadata if received
+                if metadata:
+                    # Create final message with metadata
+                    final_message = await self.finalize_assistant_message(
+                        chat_session=chat_session,
+                        message_id=message_id,
+                        model=model,
+                        current_message=current_message,
+                        full_content=metadata.content,
+                        params=params,
+                        provider_client=provider_client,
+                        extra_data={
+                            "tool_executions": [tool.model_dump() for tool in metadata.tool_executions],
+                        },
+                    )
+                    block.message = MessageRead(
+                        id=final_message.id,
+                        session_id=final_message.session_id,
+                        role=MessageRole.ASSISTANT,
+                        content=metadata.content,
+                        status=MessageStatus.COMPLETED,
+                        parent_id=message_id,
+                        created_at=final_message.created_at,
+                        usage=final_message.get_usage(),
+                        attachments=final_message.attachments,
+                        error_code=None,
+                        error_message=None,
+                        extra_data={"tool_executions": metadata.tool_executions},
+                    )
 
-            # Store metadata if received
-            if metadata:
-                # Create final message with metadata
-                await self.finalize_assistant_message(
-                    chat_session=chat_session,
-                    message_id=message_id,
-                    model=model,
-                    current_message=current_message,
-                    full_content=metadata.content,
-                    params=params,
-                    provider_client=provider_client,
-                    extra_data={
-                        "tool_executions": [tool.model_dump_json() for tool in metadata.tool_executions],
-                    },
-                )
+            yield block.model_dump_json(exclude_unset=True)
 
     @observe(name="non_streaming")
     async def generate_complete(
