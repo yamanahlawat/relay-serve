@@ -1,7 +1,6 @@
 from typing import Any, AsyncGenerator, Sequence
 from uuid import UUID
 
-from langfuse.decorators import langfuse_context, observe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.constants import MessageRole, MessageStatus, error_messages
@@ -151,33 +150,6 @@ class ChatCompletionService:
         )
         return assistant_message
 
-    def update_langfuse_trace(
-        self,
-        chat_session: ChatSession,
-        assistant_message: ChatMessage,
-        user_message: ChatMessage,
-        model: str,
-        usage: dict,
-        model_parameters: dict,
-    ) -> None:
-        """
-        Update Langfuse trace with complete context.
-        """
-        langfuse_context.update_current_observation(
-            session_id=str(chat_session.id),
-            status_message=assistant_message.status,
-            input=user_message.content,
-            output=assistant_message.content,
-            model=model,
-            usage=usage,
-            model_parameters=model_parameters,
-            metadata={
-                "model_id": chat_session.llm_model_id,
-                "provider_id": chat_session.provider_id,
-                "message_id": assistant_message.id,
-            },
-        )
-
     def get_model_params(
         self,
         model: LLMModel,
@@ -222,7 +194,7 @@ class ChatCompletionService:
         input_tokens, output_tokens = provider_client.get_token_usage()
 
         # Create message with usage metrics and metadata
-        assistant_message = await crud_message.create(
+        return await crud_message.create(
             db=self.db,
             session_id=chat_session.id,
             obj_in=MessageCreate(
@@ -240,22 +212,6 @@ class ChatCompletionService:
             ),
         )
 
-        # Update Langfuse trace
-        self.update_langfuse_trace(
-            chat_session=chat_session,
-            assistant_message=assistant_message,
-            user_message=current_message,
-            model=model.name,
-            usage={"input": input_tokens, "output": output_tokens},
-            model_parameters={
-                "max_tokens": params.max_tokens,
-                "temperature": params.temperature,
-                "top_p": params.top_p,
-            },
-        )
-        return assistant_message
-
-    @observe(name="streaming")
     async def generate_chat_stream(
         self,
         chat_session: ChatSession,
@@ -332,7 +288,6 @@ class ChatCompletionService:
 
             yield block.model_dump_json(exclude_unset=True)
 
-    @observe(name="non_streaming")
     async def generate_complete(
         self,
         chat_session: ChatSession,
@@ -369,20 +324,6 @@ class ChatCompletionService:
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-            )
-
-            # Update Langfuse context with the assistant message
-            self.update_langfuse_trace(
-                chat_session=chat_session,
-                assistant_message=assistant_message,
-                user_message=user_message,
-                model=model.name,
-                usage={"input": input_tokens, "output": output_tokens},
-                model_parameters={
-                    "max_tokens": request.model_params.max_tokens,
-                    "temperature": request.model_params.temperature,
-                    "top_p": request.model_params.top_p,
-                },
             )
 
             return CompletionResponse(

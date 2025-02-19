@@ -8,6 +8,7 @@ from app.providers.dependencies import get_model_service
 from app.providers.exceptions import DuplicateModelException, ModelNotFoundException, ProviderNotFoundException
 from app.providers.models import LLMModel
 from app.providers.schemas import ModelCreate, ModelRead, ModelUpdate
+from app.providers.schemas.model import ModelsByProvider
 from app.providers.services import LLMModelService
 
 router = APIRouter(prefix="/models", tags=["Models"])
@@ -70,6 +71,16 @@ async def create_model(
         )
 
 
+@router.get("/all/", response_model=ModelsByProvider)
+async def list_models_by_provider(
+    service: LLMModelService = Depends(get_model_service),
+) -> dict[str, list[LLMModel]]:
+    """
+    Retrieves all models across all providers in a single request
+    """
+    return await service.list_all_models()
+
+
 @router.get(
     "/",
     response_model=list[ModelRead],
@@ -78,6 +89,7 @@ async def create_model(
 async def list_models(
     service: LLMModelService = Depends(get_model_service),
     provider_id: UUID | None = None,
+    is_active: bool | None = None,
     offset: int = 0,
     limit: int = 10,
 ) -> Sequence[LLMModel]:
@@ -88,13 +100,14 @@ async def list_models(
 
     ### Parameters
     - **provider_id** (optional): Filter models by provider UUID
+    - **is_active** (optional): Filter by active status
     - **offset** (optional): Number of records to skip (default: 0)
     - **limit** (optional): Maximum number of records to return (default: 10)
 
     ### Returns
     List of model configurations with their details
     """
-    return await service.list_models(provider_id=provider_id, offset=offset, limit=limit)
+    return await service.list_models(provider_id=provider_id, is_active=is_active, offset=offset, limit=limit)
 
 
 @router.get(

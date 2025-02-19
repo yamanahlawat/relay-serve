@@ -13,8 +13,7 @@ dependencies = [
     "sqlalchemy>=2.0.38",
     "greenlet>=3.1.1",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.21.0",
-    "langfuse>=2.59.3",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.22.0",
     "redis[hiredis]>=5.2.1",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
@@ -25,9 +24,9 @@ dependencies = [
 
 [dependency-groups]
 providers = [
-    "anthropic>=0.45.2",
+    "anthropic>=0.46.0",
     "ollama>=0.4.7",
-    "openai>=1.63.0",
+    "openai>=1.63.2",
 ]
 dev = [
     "ipdb>=0.13.13",

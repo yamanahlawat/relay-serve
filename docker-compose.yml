@@ -67,51 +67,11 @@ services:
       cache:
         condition: service_healthy
 
-  # Langfuse
-  langfuse:
-    image: langfuse/langfuse:latest
-    ports:
-      - ${LANGFUSE_PORT:-4200}:3000
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://${DATABASE__USER}:${DATABASE__PASSWORD}@langfuse_db:5432/${LANGFUSE_DB}
-      NEXTAUTH_SECRET: ${LANGFUSE_AUTH_SECRET}
-      SALT: ${LANGFUSE_SALT}
-      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
-      NEXTAUTH_URL: http://localhost:3000
-      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
-      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
-    depends_on:
-      langfuse_db:
-        condition: service_healthy
-
-  # Langfuse PostgreSQL
-  langfuse_db:
-    image: postgres:latest
-    restart: always
-    env_file:
-      - .env
-    environment:
-      POSTGRES_USER: ${DATABASE__USER}
-      POSTGRES_PASSWORD: ${DATABASE__PASSWORD}
-      POSTGRES_DB: ${LANGFUSE_DB}
-    ports:
-      - ${LANGFUSE_DB_PORT:-5421}:5432
-    volumes:
-      - langfuse_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${DATABASE__USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
 volumes:
   relay_db:
   cache_data:
   redis_insight_db:
   uploads:
-  langfuse_db:
 
 networks:
   relay_network:
