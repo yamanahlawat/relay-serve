@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from app.chat.constants import llm_defaults
 
@@ -56,3 +56,14 @@ class ModelUpdate(BaseModel):
     config: dict[str, Any] | None = None
     input_cost_per_token: float | None = Field(default=None, ge=0.0)
     output_cost_per_token: float | None = Field(default=None, ge=0.0)
+
+
+class ModelsByProvider(RootModel[dict[str, list[ModelRead]]]):
+    """
+    Schema for reading models grouped by provider.
+    Args:
+        RootModel (dict[str, list[ModelRead]]): Root model for models grouped by provider
+    """
+
+    class Config:
+        from_attributes = True

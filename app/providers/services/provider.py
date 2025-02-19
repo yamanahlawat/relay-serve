@@ -24,8 +24,13 @@ class LLMProviderService:
         await self.check_duplicate_name(provider_in.name)
         return await crud_provider.create(db=self.db, obj_in=provider_in)
 
-    async def list_providers(self, offset: int = 0, limit: int = 10) -> Sequence[LLMProvider]:
-        return await crud_provider.filter(db=self.db, offset=offset, limit=limit)
+    async def list_providers(
+        self, is_active: bool | None = None, offset: int = 0, limit: int = 10
+    ) -> Sequence[LLMProvider]:
+        filters = []
+        if is_active is not None:
+            filters.append(crud_provider.model.is_active == is_active)
+        return await crud_provider.filter(db=self.db, filters=filters, offset=offset, limit=limit)
 
     async def get_provider(self, provider_id: UUID) -> LLMProvider:
         provider = await crud_provider.get(db=self.db, id=provider_id)
