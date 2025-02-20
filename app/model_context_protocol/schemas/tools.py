@@ -4,13 +4,20 @@ from mcp.types import EmbeddedResource, ImageContent, TextContent
 from pydantic import BaseModel, Field
 
 
-class MCPTool(BaseModel):
+class BaseTool(BaseModel):
     """
-    Represents an MCP tool with its metadata.
+    Base model for available tool metadata.
     """
 
     name: str
     description: str | None = None
+
+
+class MCPTool(BaseTool):
+    """
+    Represents an MCP tool with its metadata.
+    """
+
     server_name: str = Field(description="Name of the MCP server providing this tool")
     input_schema: dict[str, Any]
 
