@@ -3,6 +3,7 @@ from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfi
 from app.model_context_protocol.services.registry import MCPServerRegistry
 
 MCP_SERVERS = {
+    # Useful
     "tavily-search": {
         "command": "python",
         "args": [
@@ -13,12 +14,44 @@ MCP_SERVERS = {
         ],
         "enabled": True,
     },
+    "puppeteer": {
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-puppeteer",
+            "--headless",
+            "true",
+        ],
+        "enabled": False,
+    },
     "sentry": {
         "command": "uvx",
         "args": [
             "mcp-server-sentry",
             "--auth-token",
             settings.SENTRY_AUTH_TOKEN.get_secret_value(),
+        ],
+        "enabled": False,
+    },
+    "memory": {
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-memory",
+        ],
+        "enabled": False,
+    },
+    "sequential-thinking": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+        "enabled": False,
+    },
+    # Testing
+    "everything": {
+        "command": "npx",
+        "args": [
+            "-y",
+            "@modelcontextprotocol/server-everything",
         ],
         "enabled": False,
     },

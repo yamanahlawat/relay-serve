@@ -87,5 +87,5 @@ class CompletionMetadata(BaseModel):
     Final metadata for a chat completion
     """
 
-    tool_executions: list[ToolExecution] = []
+    tool_executions: list[StreamBlock] = []
     content: str = ""

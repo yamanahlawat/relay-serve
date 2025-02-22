@@ -71,6 +71,12 @@ class LLMProviderBase(ABC):
             temperature: Temperature parameter for generation.
                 Higher values make output more random and creative; lower values
                 make output more focused and deterministic.
+            top_p: Top-p parameter for generation.
+                Higher values make output more random and creative; lower values
+                make output more focused and deterministic.
+            messages: Optional previous conversation messages.
+            session_id: Optional session ID for stopping stream.
+            available_tools: Optional list of available tools.
         Yields:
             str: The generated text chunks in a stream.
         """
