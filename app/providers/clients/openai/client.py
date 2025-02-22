@@ -214,7 +214,7 @@ class OpenAIProvider(LLMProviderBase):
                             stream_blocks.append(block)
 
                         completion_metadata.content = "".join(content_chunks)
-                        completion_metadata.tool_executions = stream_blocks
+                        completion_metadata.stream_blocks = stream_blocks
                         yield StreamBlockFactory.create_done_block(), completion_metadata
                         return
 
@@ -343,7 +343,7 @@ class OpenAIProvider(LLMProviderBase):
                 stream_blocks.append(block)
 
             completion_metadata.content = "".join(content_chunks)
-            completion_metadata.tool_executions = stream_blocks
+            completion_metadata.stream_blocks = stream_blocks
             yield StreamBlockFactory.create_done_block(), completion_metadata
 
         except Exception as error:

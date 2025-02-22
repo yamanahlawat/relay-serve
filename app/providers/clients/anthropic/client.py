@@ -99,6 +99,7 @@ class AnthropicProvider(LLMProviderBase):
     ) -> AsyncGenerator[tuple[StreamBlock, CompletionMetadata | None], None]:
         """
         Generate streaming response with tool support.
+        Enhanced with improved text accumulation and stream block management.
         """
         try:
             # Signal initial thinking state
@@ -108,7 +109,6 @@ class AnthropicProvider(LLMProviderBase):
             completion_metadata = CompletionMetadata()
             content_chunks: list[str] = []
             current_tool_calls: dict[str, ToolExecution] = {}
-            current_partial_json = ""
             stream_blocks: list[StreamBlock] = []
 
             # Format messages for Anthropic API
@@ -156,6 +156,12 @@ class AnthropicProvider(LLMProviderBase):
 
                         elif chunk.type == "content_block_start":
                             if chunk.content_block.type == "tool_use":
+                                # Store any accumulated content before tool execution
+                                if content_chunks:
+                                    block = StreamBlockFactory.create_content_block(content="".join(content_chunks))
+                                    stream_blocks.append(block)
+                                    content_chunks = []
+
                                 tool_id = chunk.content_block.id
                                 tool_name = chunk.content_block.name
                                 current_tool_calls[tool_id] = ToolExecution(
@@ -174,7 +180,6 @@ class AnthropicProvider(LLMProviderBase):
                             if chunk.delta.type == "text_delta":
                                 content_chunks.append(chunk.delta.text)
                                 block = StreamBlockFactory.create_content_block(content=chunk.delta.text)
-                                stream_blocks.append(block)
                                 yield block, None
                             elif chunk.delta.type == "input_json_delta":
                                 current_partial_json += chunk.delta.partial_json
@@ -196,29 +201,10 @@ class AnthropicProvider(LLMProviderBase):
                                     stream_blocks.append(block)
                                     yield block, None
 
-                                except json.JSONDecodeError as e:
-                                    error_msg = f"Invalid tool arguments format: {str(e)}"
-                                    if tool_id in current_tool_calls:
-                                        current_tool_calls[tool_id].error = error_msg
-                                    yield (
-                                        StreamBlockFactory.create_error_block(
-                                            error_type="tool_argument_error",
-                                            error_detail=error_msg,
-                                        ),
-                                        None,
-                                    )
-
-                        elif chunk.type == "message_delta":
-                            if hasattr(chunk.delta, "usage"):
-                                self._last_usage = chunk.delta.usage
-
-                        elif chunk.type == "message_stop":
-                            if chunk.message.stop_reason == "tool_use" and tool_id and tool_name:
-                                try:
                                     # Execute the tool
                                     tool_result = await self.tool_handler.execute_tool(
                                         name=tool_name,
-                                        arguments=current_tool_calls[tool_id].arguments,
+                                        arguments=tool_input,
                                         call_id=tool_id,
                                     )
 
@@ -229,7 +215,7 @@ class AnthropicProvider(LLMProviderBase):
                                     # Add tool messages to conversation
                                     tool_messages = self.tool_handler.format_tool_messages(
                                         tool_name=tool_name,
-                                        tool_args=current_tool_calls[tool_id].arguments,
+                                        tool_args=tool_input,
                                         tool_result=formatted_result,
                                         tool_id=tool_id,
                                     )
@@ -251,26 +237,36 @@ class AnthropicProvider(LLMProviderBase):
                                         None,
                                     )
 
-                                    # Continue with a new stream iteration
-                                    break
-
-                                except Exception as e:
-                                    error_msg = f"Tool execution failed: {str(e)}"
+                                except json.JSONDecodeError as e:
+                                    error_msg = f"Invalid tool arguments format: {str(e)}"
                                     if tool_id in current_tool_calls:
                                         current_tool_calls[tool_id].error = error_msg
                                     yield (
                                         StreamBlockFactory.create_error_block(
-                                            error_type="tool_execution_error",
+                                            error_type="tool_argument_error",
                                             error_detail=error_msg,
                                         ),
                                         None,
                                     )
-                                    return
+
+                        elif chunk.type == "message_delta":
+                            if hasattr(chunk.delta, "usage"):
+                                self._last_usage = chunk.usage
+
+                        elif chunk.type == "message_stop":
+                            if chunk.message.stop_reason == "tool_use" and tool_id and tool_name:
+                                # Continue with a new stream iteration
+                                break
 
                             elif chunk.message.stop_reason == "end_turn":
+                                # Store any remaining content
+                                if content_chunks:
+                                    block = StreamBlockFactory.create_content_block(content="".join(content_chunks))
+                                    stream_blocks.append(block)
+
                                 # Final yield with completion metadata
                                 completion_metadata.content = "".join(content_chunks)
-                                completion_metadata.tool_executions = stream_blocks
+                                completion_metadata.stream_blocks = stream_blocks
                                 yield StreamBlockFactory.create_done_block(), completion_metadata
                                 return
 
