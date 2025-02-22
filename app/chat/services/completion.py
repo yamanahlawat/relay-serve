@@ -268,7 +268,7 @@ class ChatCompletionService:
                         params=params,
                         provider_client=provider_client,
                         extra_data={
-                            "tool_executions": [tool.model_dump() for tool in metadata.tool_executions],
+                            "stream_blocks": [tool.model_dump() for tool in metadata.stream_blocks],
                         },
                     )
                     block.message = MessageRead(
@@ -283,7 +283,7 @@ class ChatCompletionService:
                         attachments=final_message.attachments,
                         error_code=None,
                         error_message=None,
-                        extra_data={"tool_executions": metadata.tool_executions},
+                        extra_data={"stream_blocks": metadata.stream_blocks},
                     )
 
             yield block.model_dump_json(exclude_unset=True)
