@@ -57,3 +57,6 @@ class ChatMessageService:
     async def delete_message(self, session_id: UUID, message_id: UUID) -> None:
         message = await self.get_message(session_id=session_id, message_id=message_id)
         await crud_message.delete(db=self.db, id=message.id)
+
+    async def bulk_delete_messages(self, message_ids: list[UUID]) -> None:
+        await crud_message.bulk_delete(db=self.db, ids=message_ids)

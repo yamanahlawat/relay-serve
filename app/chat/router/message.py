@@ -194,3 +194,17 @@ async def delete_message(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error.message,
         )
+
+
+@router.delete("/bulk/", status_code=status.HTTP_204_NO_CONTENT)
+async def bulk_delete_messages(
+    message_ids: list[UUID],
+    service: ChatMessageService = Depends(get_chat_message_service),
+) -> None:
+    """
+    ## Bulk Delete Messages
+    Permanently deletes multiple messages by their IDs.
+    ### Parameters
+    - **message_ids**: List of UUIDs for the messages to delete.
+    """
+    await service.bulk_delete_messages(message_ids=message_ids)
