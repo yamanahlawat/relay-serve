@@ -195,7 +195,7 @@ class OpenAIProvider(LLMProviderBase):
                             ),
                             None,
                         )
-                        await stream.close()
+                        await stream.aclose()
                         return
 
                     # Handle regular content

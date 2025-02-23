@@ -12,6 +12,7 @@ from app.chat.schemas.common import ChatUsage
 from app.chat.schemas.message import MessageRead, MessageUsage
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
+from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.services.tool import MCPToolService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
@@ -27,16 +28,14 @@ class ChatCompletionService:
 
     def __init__(
         self,
-        db: AsyncSession,
         provider_factory: ProviderFactory,
     ) -> None:
-        self.db = db
         self.provider_factory = provider_factory
-        self.message_service = ChatMessageService(db=self.db)
         self.mcp_service = MCPToolService()
 
     async def validate_request(
         self,
+        db: AsyncSession,
         session_id: UUID,
     ) -> tuple[ChatSession, LLMProvider, LLMModel]:
         """
@@ -47,7 +46,7 @@ class ChatCompletionService:
             Tuple of (ChatSession, LLMProvider, LLMModel)
         """
         # Verify session exists and is active
-        session_service = ChatSessionService(db=self.db)
+        session_service = ChatSessionService(db=db)
         active_session = await session_service.get_active_session(session_id=session_id)
         return active_session, active_session.provider, active_session.llm_model
 
@@ -64,10 +63,12 @@ class ChatCompletionService:
         Returns:
             Tuple of (ChatSession, LLMProvider, LLMModel)
         """
-        active_session, provider, llm_model = await self.validate_request(session_id=session_id)
-        # Get message and verify it belongs to session
-        await self.message_service.get_message(session_id=session_id, message_id=message_id)
-        return active_session, provider, llm_model
+        async with AsyncSessionLocal() as db:
+            active_session, provider, llm_model = await self.validate_request(db=db, session_id=session_id)
+            # Get message and verify it belongs to session
+            message_service = ChatMessageService(db=db)
+            await message_service.get_message(session_id=session_id, message_id=message_id)
+            return active_session, provider, llm_model
 
     async def create_user_message(
         self,
@@ -80,16 +81,17 @@ class ChatCompletionService:
         """
         Create a new user message.
         """
-        return await crud_message.create(
-            db=self.db,
-            session_id=session_id,
-            obj_in=MessageCreate(
-                content=content,
-                role=MessageRole.USER,
-                status=MessageStatus.COMPLETED,
-                parent_id=parent_id,
-            ),
-        )
+        async with AsyncSessionLocal() as db:
+            return await crud_message.create(
+                db=db,
+                session_id=session_id,
+                obj_in=MessageCreate(
+                    content=content,
+                    role=MessageRole.USER,
+                    status=MessageStatus.COMPLETED,
+                    parent_id=parent_id,
+                ),
+            )
 
     def get_provider_client(self, provider: LLMProvider) -> LLMProviderBase:
         """
@@ -109,11 +111,12 @@ class ChatCompletionService:
         """
         Get conversation history for context.
         """
-        return await crud_message.get_session_context(
-            db=self.db,
-            session_id=chat_session.id,
-            exclude_message_id=current_message_id,
-        )
+        async with AsyncSessionLocal() as db:
+            return await crud_message.get_session_context(
+                db=db,
+                session_id=chat_session.id,
+                exclude_message_id=current_message_id,
+            )
 
     async def create_assistant_message(
         self,
@@ -131,24 +134,25 @@ class ChatCompletionService:
         input_cost = input_tokens * model.input_cost_per_token
         output_cost = output_tokens * model.output_cost_per_token
 
-        # Create message with usage metrics
-        assistant_message = await crud_message.create(
-            db=self.db,
-            session_id=chat_session.id,
-            obj_in=MessageCreate(
-                content=content,
-                role=MessageRole.ASSISTANT,
-                status=MessageStatus.COMPLETED,
-                parent_id=parent_id,
-                usage=MessageUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    input_cost=input_cost,
-                    output_cost=output_cost,
+        async with AsyncSessionLocal() as db:
+            # Create message with usage metrics
+            assistant_message = await crud_message.create(
+                db=db,
+                session_id=chat_session.id,
+                obj_in=MessageCreate(
+                    content=content,
+                    role=MessageRole.ASSISTANT,
+                    status=MessageStatus.COMPLETED,
+                    parent_id=parent_id,
+                    usage=MessageUsage(
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        input_cost=input_cost,
+                        output_cost=output_cost,
+                    ),
                 ),
-            ),
-        )
-        return assistant_message
+            )
+            return assistant_message
 
     def get_model_params(
         self,
@@ -193,24 +197,25 @@ class ChatCompletionService:
 
         input_tokens, output_tokens = provider_client.get_token_usage()
 
-        # Create message with usage metrics and metadata
-        return await crud_message.create(
-            db=self.db,
-            session_id=chat_session.id,
-            obj_in=MessageCreate(
-                content=full_content,
-                role=MessageRole.ASSISTANT,
-                status=MessageStatus.COMPLETED,
-                parent_id=message_id,
-                usage=MessageUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    input_cost=input_tokens * model.input_cost_per_token,
-                    output_cost=output_tokens * model.output_cost_per_token,
+        async with AsyncSessionLocal() as db:
+            # Create message with usage metrics and metadata
+            return await crud_message.create(
+                db=db,
+                session_id=chat_session.id,
+                obj_in=MessageCreate(
+                    content=full_content,
+                    role=MessageRole.ASSISTANT,
+                    status=MessageStatus.COMPLETED,
+                    parent_id=message_id,
+                    usage=MessageUsage(
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        input_cost=input_tokens * model.input_cost_per_token,
+                        output_cost=output_tokens * model.output_cost_per_token,
+                    ),
+                    extra_data=extra_data or {},
                 ),
-                extra_data=extra_data or {},
-            ),
-        )
+            )
 
     async def generate_chat_stream(
         self,
@@ -231,10 +236,12 @@ class ChatCompletionService:
 
         Yields a formatted string representation of each state for the frontend.
         """
-        current_message = await self.message_service.get_message(
-            session_id=chat_session.id,
-            message_id=message_id,
-        )
+        async with AsyncSessionLocal() as db:
+            message_service = ChatMessageService(db=db)
+            current_message = await message_service.get_message(
+                session_id=chat_session.id,
+                message_id=message_id,
+            )
 
         history = await self.get_conversation_history(
             chat_session=chat_session,
