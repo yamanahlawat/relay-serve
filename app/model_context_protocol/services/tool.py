@@ -69,6 +69,8 @@ class MCPToolService:
         # Execute tool
         result = await session.call_tool(name=tool_call.name, arguments=tool_call.arguments)
 
+        logger.info(f"Got tool results for tool: {tool_call.name}")
+
         return ToolResult(content=result.content, call_id=tool_call.call_id)
 
     async def refresh_tools(self) -> None:
