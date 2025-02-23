@@ -2,6 +2,7 @@ from typing import Any, Generic, Sequence, Type, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import InstrumentedAttribute
@@ -121,7 +122,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         await db.refresh(db_obj)
         return db_obj
 
-    async def delete(self, db: AsyncSession, *, id: UUID) -> ModelType | None:
+    async def delete(self, db: AsyncSession, *, id: UUID) -> None:
         """
         Delete a specific record by id.
         Args:
@@ -133,4 +134,16 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         db_obj = await db.get(self.model, id)
         await db.delete(db_obj)
         await db.commit()
-        return db_obj
+
+    async def bulk_delete(self, db: AsyncSession, *, ids: list[UUID]) -> None:
+        """
+        Delete multiple records by ids.
+        Args:
+            db (AsyncSession): Database session
+            ids (list[UUID]): List of ids of the records to delete
+        Returns:
+            List of instances of the ModelType for the deleted records
+        """
+        statement = sql_delete(self.model).where(self.model.id.in_(ids))
+        await db.execute(statement)
+        await db.commit()
