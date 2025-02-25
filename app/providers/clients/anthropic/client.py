@@ -187,8 +187,10 @@ class AnthropicProvider(LLMProviderBase):
                         elif chunk.type == "content_block_stop":
                             if chunk.content_block.type == "tool_use":
                                 try:
-                                    # Parse accumulated JSON
-                                    tool_input = json.loads(current_partial_json)
+                                    # Parse accumulated JSON and  Handle empty arguments case
+                                    tool_input = (
+                                        {} if not current_partial_json.strip() else json.loads(current_partial_json)
+                                    )
                                     if tool_id in current_tool_calls:
                                         current_tool_calls[tool_id].arguments = tool_input
 
