@@ -1,3 +1,4 @@
+import os
 from contextlib import AsyncExitStack
 from typing import Optional
 
@@ -24,7 +25,13 @@ class MCPServerManager:
         """
         try:
             # Create server parameters
-            server_params = StdioServerParameters(command=config.command, args=config.args, env=config.env)
+            # If env is provided, merge it with the current environment instead of replacing it
+            server_env = None
+            if config.env:
+                # Preserve the current environment and update with the provided env variables
+                server_env = {**os.environ, **config.env}
+
+            server_params = StdioServerParameters(command=config.command, args=config.args, env=server_env)
 
             # Start server process and get transport
             stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))

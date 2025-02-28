@@ -34,7 +34,7 @@ services:
     volumes:
       - relay_db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${DATABASE__USER:-relay_user}"]
+      test: ["CMD", "pg_isready", "-U", "${DATABASE__USER:-relay_user}", "-d", "${DATABASE__DB:-relay_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -72,6 +72,3 @@ volumes:
   cache_data:
   redis_insight_db:
   uploads:
-
-networks:
-  relay_network:
