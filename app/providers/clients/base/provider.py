@@ -18,38 +18,6 @@ class LLMProviderBase(ABC):
         self.provider_type = ProviderType(provider.type)
 
     @abstractmethod
-    async def generate(
-        self,
-        current_message: ChatMessage,
-        model: str,
-        system_context: str,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        messages: Sequence[ChatMessage] | None = None,
-        session_id: UUID | None = None,
-    ) -> str:
-        """
-        Generate text using the provider.
-        Args:
-            current_message: The current message to generate completion for.
-            model: The name of the model to use for generation.
-            system_context: The system context to use for generation.
-            max_tokens: Maximum number of tokens to generate.
-            temperature: Temperature parameter for generation.
-                Higher values make output more random and creative; lower values
-                make output more focused and deterministic.
-            top_p: Top-p parameter for generation.
-                Higher values make output more random and creative; lower values
-                make output more focused and deterministic.
-            messages: Optional previous conversation messages.
-            session_id: Optional session ID for stopping stream.
-        Returns:
-            str: The generated text.
-        """
-        pass
-
-    @abstractmethod
     async def generate_stream(
         self,
         current_message: ChatMessage,

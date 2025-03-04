@@ -2,6 +2,7 @@ import json
 from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
+from llm_registry import CapabilityRegistry, ModelCapabilities
 from loguru import logger
 from openai import (
     APIConnectionError,
@@ -114,14 +115,20 @@ class OpenAIProvider(LLMProviderBase):
         messages: Sequence[ChatMessage],
         current_message: ChatMessage,
         system_context: str,
+        model: str,
+        model_capabilities: ModelCapabilities | None = None,
     ) -> list[dict[str, str]]:
         """
         Prepare message history for OpenAI API.
         """
         formatted_messages = []
 
-        if system_context:
+        # Check if model supports system prompts
+        if system_context and model_capabilities.features.system_prompt:
             formatted_messages.append({"role": "system", "content": system_context})
+        else:
+            logger.warning(f"Model {model} does not support system prompt")
+            formatted_messages.append({"role": "user", "content": system_context})
 
         # Format history messages
         for message in messages:
@@ -161,27 +168,53 @@ class OpenAIProvider(LLMProviderBase):
             current_tool_calls: dict[str, ToolExecution] = {}
             stream_blocks: list[StreamBlock] = []
 
+            # Check model capabilities from llm-registry
+            model_registry = CapabilityRegistry()
+            try:
+                model_capabilities = model_registry.get_model(model_id=model)
+            except KeyError:
+                logger.exception(f"Model {model} capabilities not found in registry")
+
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
                 current_message=current_message,
                 system_context=system_context,
+                model=model,
+                model_capabilities=model_capabilities,
             )
 
-            # Format tools if available
-            tools_payload = self.tool_handler.format_tools(tools=available_tools) if available_tools else None
+            # Only format tools if model supports them
+            tools_payload = None
+            if available_tools and model_capabilities and model_capabilities.features.tools:
+                tools_payload = self.tool_handler.format_tools(tools=available_tools)
 
             # Initialize conversation messages with the formatted history
             conversation_messages = formatted_messages.copy()
 
+            # Build API parameters based on model capabilities
+            api_params = {
+                "model": model,
+                "messages": conversation_messages,
+            }
+
+            if model_capabilities:
+                if model_capabilities.api_params.max_tokens:
+                    api_params["max_tokens"] = max_tokens
+                else:
+                    logger.warning(f"Model {model} does not support max_tokens")
+                if model_capabilities.api_params.temperature:
+                    api_params["temperature"] = temperature
+                else:
+                    logger.warning(f"Model {model} does not support temperature")
+                if model_capabilities.api_params.top_p:
+                    api_params["top_p"] = top_p
+                else:
+                    logger.warning(f"Model {model} does not support top_p")
+                if tools_payload:
+                    api_params["tools"] = tools_payload
+
             while True:  # Continue until all tool calls are processed
-                stream = await self.stream_handler.create_completion_stream(
-                    model=model,
-                    messages=conversation_messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    tools=tools_payload,
-                )
+                stream = await self.stream_handler.create_completion_stream(**api_params)
 
                 current_tool_index: dict[int, str] = {}
                 has_tool_calls = False

@@ -7,8 +7,7 @@ from app.chat.constants import MessageRole, MessageStatus, error_messages
 from app.chat.crud import crud_message
 from app.chat.models import ChatMessage, ChatSession
 from app.chat.schemas import MessageCreate
-from app.chat.schemas.chat import CompletionParams, CompletionRequest, CompletionResponse
-from app.chat.schemas.common import ChatUsage
+from app.chat.schemas.chat import CompletionParams
 from app.chat.schemas.message import MessageRead, MessageUsage
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
@@ -74,8 +73,6 @@ class ChatCompletionService:
         self,
         session_id: UUID,
         content: str,
-        provider: LLMProvider,
-        model: LLMModel,
         parent_id: UUID | None = None,
     ) -> ChatMessage:
         """
@@ -294,56 +291,3 @@ class ChatCompletionService:
                     )
 
             yield block.model_dump_json(exclude_unset=True)
-
-    async def generate_complete(
-        self,
-        chat_session: ChatSession,
-        model: LLMModel,
-        provider_client: AnthropicProvider | OllamaProvider | OpenAIProvider,
-        request: CompletionRequest,
-        user_message: ChatMessage,
-    ) -> CompletionResponse:
-        """
-        Generate complete response.
-        """
-        try:
-            # Get conversation history
-            history = await self.get_conversation_history(
-                chat_session=chat_session,
-                current_message_id=user_message.id,
-            )
-            model_params = self.get_model_params(model=model, request_params=request.model_params)
-            system_context = chat_session.system_context
-
-            # Generate response with history
-            content, input_tokens, output_tokens = await provider_client.generate(
-                prompt=request.prompt,
-                model=model.name,
-                system_context=system_context,
-                messages=history,
-                **model_params,
-            )
-
-            assistant_message = await self.create_assistant_message(
-                chat_session=chat_session,
-                content=content,
-                parent_id=user_message.id,
-                model=model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-
-            return CompletionResponse(
-                content=content,
-                model=model.name,
-                provider=provider_client.provider.name,
-                usage=ChatUsage(**assistant_message.get_usage()),
-            )
-        except Exception as error:
-            error_message = await self.handle_provider_error(error)
-            return CompletionResponse(
-                content=error_message,
-                model=model.name,
-                provider=provider_client.provider.type.value,
-                usage=ChatUsage(input_tokens=0, output_tokens=0, input_cost=0, output_cost=0, total_cost=0),
-            )

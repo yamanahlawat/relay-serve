@@ -9,7 +9,6 @@ class ProviderType(BaseEnum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     OLLAMA = "ollama"
-    CUSTOM = "custom"
 
 
 class ProviderErrorCode(BaseEnum):
