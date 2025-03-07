@@ -1,16 +1,11 @@
 import json
-from typing import AsyncGenerator, Sequence
+from typing import Any, AsyncGenerator, Sequence
 from uuid import UUID
 
-from llm_registry import CapabilityRegistry, ModelCapabilities
+from llm_registry import CapabilityRegistry, ModelCapabilities, ModelNotFoundError
 from loguru import logger
 from openai import (
-    APIConnectionError,
-    APIError,
-    APIStatusError,
     AsyncOpenAI,
-    AuthenticationError,
-    RateLimitError,
 )
 
 from app.chat.constants import AttachmentType, MessageRole
@@ -24,12 +19,6 @@ from app.providers.clients.base import LLMProviderBase
 from app.providers.clients.openai.stream import OpenAIStreamHandler
 from app.providers.clients.openai.tool import OpenAIToolHandler
 from app.providers.constants import ProviderType
-from app.providers.exceptions import (
-    ProviderAPIError,
-    ProviderConfigurationError,
-    ProviderConnectionError,
-    ProviderRateLimitError,
-)
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
@@ -49,64 +38,36 @@ class OpenAIProvider(LLMProviderBase):
         self.tool_handler = OpenAIToolHandler()
         self.stream_handler = OpenAIStreamHandler(client=self._client)
 
-    def _handle_api_error(self, error: APIError) -> None:
+    def _format_message_content(
+        self, message: ChatMessage, is_current: bool = False, model_capabilities: ModelCapabilities | None = None
+    ) -> str | None | list[dict[str, Any]]:
         """
-        Handle OpenAI API errors and raise appropriate provider exceptions.
-        """
-        if isinstance(error, APIConnectionError):
-            logger.exception("OpenAI API connection error during generation")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error=str(error),
-            ) from error
-        elif isinstance(error, RateLimitError):
-            logger.exception("OpenAI API rate limit exceeded during generation")
-            raise ProviderRateLimitError(
-                provider=self.provider_type,
-                error=str(error),
-            ) from error
-        elif isinstance(error, AuthenticationError):
-            logger.exception("OpenAI authentication error during generation")
-            raise ProviderConfigurationError(
-                provider=self.provider_type,
-                message="Invalid API credentials",
-                error=str(error),
-            ) from error
-        elif isinstance(error, APIStatusError):
-            logger.exception("OpenAI API status error during generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=error.status_code,
-                message=error.message,
-                error=str(error),
-            ) from error
-        elif isinstance(error, APIError):
-            logger.exception("OpenAI API error during generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=getattr(error, "status_code", 500),
-                error=str(error),
-            ) from error
-
-    def _format_message_content(self, message: ChatMessage, is_current: bool = False) -> list[dict]:
-        """
-        Format message content with any image attachments.
+        Format message content with any image attachments based on model capabilities.
         """
         # Add text content
         content = [{"type": "text", "text": message.content}]
 
-        # Add any image attachments
+        # For models without vision support or unknown models with text-only content, return simple string
+        if (model_capabilities and not model_capabilities.features.vision) or (
+            not model_capabilities and not message.attachments
+        ):
+            return content
+
+        # Add any image attachments if present and either model supports vision or capabilities unknown
         if is_current and message.attachments:
-            content.extend(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{ImageProcessor.encode_image_to_base64(attachment.storage_path)}",
-                    },
-                }
-                for attachment in message.direct_attachments
-                if attachment.type == AttachmentType.IMAGE.value
-            )
+            if model_capabilities and not model_capabilities.features.vision:
+                logger.warning("Model does not support vision, skipping image attachments")
+            else:
+                content.extend(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{ImageProcessor.encode_image_to_base64(attachment.storage_path)}",
+                        },
+                    }
+                    for attachment in message.direct_attachments
+                    if attachment.type == AttachmentType.IMAGE.value
+                )
 
         return content
 
@@ -117,28 +78,36 @@ class OpenAIProvider(LLMProviderBase):
         system_context: str,
         model: str,
         model_capabilities: ModelCapabilities | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, str | list[dict]]]:
         """
         Prepare message history for OpenAI API.
         """
         formatted_messages = []
 
-        # Check if model supports system prompts
-        if system_context and model_capabilities.features.system_prompt:
-            formatted_messages.append({"role": "system", "content": system_context})
-        else:
-            logger.warning(f"Model {model} does not support system prompt")
-            formatted_messages.append({"role": "user", "content": system_context})
+        # Handle system prompt based on model capabilities
+        if system_context:
+            if model_capabilities and not model_capabilities.features.system_prompt:
+                logger.warning(f"Model {model} does not support system prompt, adding as user message")
+                formatted_messages.append({"role": "user", "content": system_context})
+            else:
+                # If capabilities unknown or system prompts supported, use system message
+                formatted_messages.append({"role": "system", "content": system_context})
 
         # Format history messages
         for message in messages:
-            message_content = self._format_message_content(message=message, is_current=False)
+            message_content = self._format_message_content(
+                message=message,
+                is_current=False,
+                model_capabilities=model_capabilities,
+            )
             formatted_messages.append(
                 {"role": "assistant" if message.role == MessageRole.ASSISTANT else "user", "content": message_content}
             )
 
         # Add current message
-        current_content = self._format_message_content(message=current_message, is_current=True)
+        current_content = self._format_message_content(
+            message=current_message, is_current=True, model_capabilities=model_capabilities
+        )
         formatted_messages.append({"role": "user", "content": current_content})
 
         return formatted_messages
@@ -171,9 +140,10 @@ class OpenAIProvider(LLMProviderBase):
             # Check model capabilities from llm-registry
             model_registry = CapabilityRegistry()
             try:
-                model_capabilities = model_registry.get_model(model_id=model)
-            except KeyError:
+                model_capabilities = model_registry.get_model(model_id=model.lower())
+            except ModelNotFoundError:
                 logger.exception(f"Model {model} capabilities not found in registry")
+                model_capabilities = None
 
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
@@ -182,11 +152,6 @@ class OpenAIProvider(LLMProviderBase):
                 model=model,
                 model_capabilities=model_capabilities,
             )
-
-            # Only format tools if model supports them
-            tools_payload = None
-            if available_tools and model_capabilities and model_capabilities.features.tools:
-                tools_payload = self.tool_handler.format_tools(tools=available_tools)
 
             # Initialize conversation messages with the formatted history
             conversation_messages = formatted_messages.copy()
@@ -198,20 +163,50 @@ class OpenAIProvider(LLMProviderBase):
             }
 
             if model_capabilities:
+                # Only include parameters that are supported by the model
                 if model_capabilities.api_params.max_tokens:
-                    api_params["max_tokens"] = max_tokens
+                    api_params["max_completion_tokens"] = max_tokens
                 else:
                     logger.warning(f"Model {model} does not support max_tokens")
+
                 if model_capabilities.api_params.temperature:
                     api_params["temperature"] = temperature
                 else:
                     logger.warning(f"Model {model} does not support temperature")
+
                 if model_capabilities.api_params.top_p:
                     api_params["top_p"] = top_p
                 else:
                     logger.warning(f"Model {model} does not support top_p")
-                if tools_payload:
+
+                if model_capabilities.api_params.stream:
+                    api_params["stream"] = True
+                else:
+                    logger.warning(f"Model {model} does not support streaming")
+
+                # Handle tool-related parameters
+                if available_tools and model_capabilities.features.tools:
+                    tools_payload = self.tool_handler.format_tools(tools=available_tools)
                     api_params["tools"] = tools_payload
+                    api_params["tool_choice"] = "auto"
+                else:
+                    logger.warning(f"Model {model} does not support tools, skipping tool-related parameters")
+            else:
+                logger.warning(f"Model {model} capabilities not found in registry, passing all parameters")
+                # If model not in registry, pass all parameters
+                api_params.update(
+                    {
+                        "max_completion_tokens": max_tokens,
+                        "temperature": temperature,
+                        "top_p": top_p,
+                        "stream": True,
+                    }
+                )
+                # For unknown models, include tools if provided but warn
+                if available_tools:
+                    logger.warning(f"Model {model} capabilities not found in registry, including tool parameters")
+                    api_params["tools"] = self.tool_handler.format_tools(tools=available_tools)
+                    api_params["tool_choice"] = "auto"
 
             while True:  # Continue until all tool calls are processed
                 stream = await self.stream_handler.create_completion_stream(**api_params)
@@ -388,53 +383,6 @@ class OpenAIProvider(LLMProviderBase):
                 ),
                 None,
             )
-
-    async def generate(
-        self,
-        current_message: ChatMessage,
-        model: str,
-        system_context: str,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        messages: Sequence[ChatMessage] | None = None,
-    ) -> tuple[str, int, int] | None:
-        """Generate text using OpenAI."""
-        formatted_messages = self._prepare_messages(
-            messages=messages or [],
-            current_message=current_message,
-            system_context=system_context,
-        )
-
-        try:
-            response = await self._client.chat.completions.create(
-                model=model,
-                messages=formatted_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-            )
-
-            generated_text = response.choices[0].message.content or ""
-            self._last_usage = (
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens,
-            )
-
-            return (
-                generated_text,
-                self._last_usage[0],
-                self._last_usage[1],
-            )
-
-        except (
-            APIConnectionError,
-            RateLimitError,
-            AuthenticationError,
-            APIStatusError,
-            APIError,
-        ) as error:
-            self._handle_api_error(error)
 
     def get_token_usage(self) -> tuple[int, int]:
         """

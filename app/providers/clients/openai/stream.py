@@ -121,12 +121,8 @@ class OpenAIStreamHandler:
         api_params = {
             "model": model,
             "messages": messages,
-            "stream": True,
             "stream_options": {"include_usage": True},
             **kwargs,
         }
-
-        if "tools" in api_params:
-            api_params["tool_choice"] = "auto"
 
         return await self.client.chat.completions.create(**api_params)

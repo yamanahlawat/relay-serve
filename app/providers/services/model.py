@@ -36,13 +36,20 @@ class LLMModelService:
         return await crud_model.create(db=self.db, obj_in=model_in)
 
     async def list_models(
-        self, provider_id: UUID | None = None, is_active: bool | None = None, offset: int = 0, limit: int = 10
+        self,
+        provider_id: UUID | None = None,
+        is_active: bool | None = None,
+        model_name: str | None = None,
+        offset: int = 0,
+        limit: int = 10,
     ) -> Sequence[LLMModel]:
         filters = []
         if provider_id:
             filters.append(crud_model.model.provider_id == provider_id)
         if is_active is not None:
             filters.append(crud_model.model.is_active == is_active)
+        if model_name:
+            filters.append(crud_model.model.name.ilike(f"%{model_name}%"))
         models = await crud_model.filter(db=self.db, filters=filters, offset=offset, limit=limit)
         return models
 
