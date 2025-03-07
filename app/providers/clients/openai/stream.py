@@ -107,31 +107,22 @@ class OpenAIStreamHandler:
         self,
         model: str,
         messages: list[dict],
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        tools: list[dict] | None = None,
+        **kwargs: Any,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         """
         Create a completion stream from OpenAI.
         Args:
             model: Model identifier
             messages: Formatted messages for the API
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature parameter
-            top_p: Top-p parameter
-            tools: Optional tool definitions
+            **kwargs: Additional API parameters that have been validated by the client
         Returns:
             AsyncGenerator yielding completion chunks
         """
-        return await self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stream=True,
-            tools=tools,
-            tool_choice="auto" if tools else None,
-            stream_options={"include_usage": True},
-        )
+        api_params = {
+            "model": model,
+            "messages": messages,
+            "stream_options": {"include_usage": True},
+            **kwargs,
+        }
+
+        return await self.client.chat.completions.create(**api_params)

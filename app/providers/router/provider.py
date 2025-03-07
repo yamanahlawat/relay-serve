@@ -66,6 +66,7 @@ async def create_provider(
 async def list_providers(
     service: LLMProviderService = Depends(get_provider_service),
     is_active: bool | None = None,
+    provider_name: str | None = None,
     offset: int = 0,
     limit: int = 10,
 ) -> Sequence[LLMProvider]:
@@ -76,13 +77,19 @@ async def list_providers(
 
     ### Parameters
     - **is_active** (optional): Filter by active status
+    - **provider_name** (optional): Filter providers by name
     - **offset** (optional): Number of records to skip (default: 0)
     - **limit** (optional): Maximum number of records to return (default: 10)
 
     ### Returns
     List of provider configurations with their details
     """
-    return await service.list_providers(is_active=is_active, offset=offset, limit=limit)
+    return await service.list_providers(
+        is_active=is_active,
+        provider_name=provider_name,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get(

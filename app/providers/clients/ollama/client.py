@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Sequence
 from uuid import UUID, uuid4
 
 from loguru import logger
-from ollama import AsyncClient, Image, Message, ResponseError
+from ollama import AsyncClient, Image, Message
 
 from app.chat.constants import AttachmentType, MessageRole
 from app.chat.models import ChatMessage
@@ -14,12 +14,6 @@ from app.model_context_protocol.schemas.tools import MCPTool
 from app.providers.clients.base import LLMProviderBase
 from app.providers.clients.ollama.tool import OllamaToolHandler
 from app.providers.constants import ProviderType
-from app.providers.exceptions import (
-    ProviderAPIError,
-    ProviderConfigurationError,
-    ProviderConnectionError,
-    ProviderRateLimitError,
-)
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
@@ -89,59 +83,6 @@ class OllamaProvider(LLMProviderBase):
             )
         )
         return formatted_messages
-
-    async def _handle_api_error(self, error: Exception) -> None:
-        """
-        Handle Ollama API errors and raise appropriate provider exceptions.
-        """
-        if isinstance(error, ResponseError):
-            if error.status_code == 404:
-                logger.exception("Ollama model not found")
-                raise ProviderConfigurationError(
-                    provider=self.provider_type,
-                    message="Model not found or not loaded",
-                    error=str(error),
-                ) from error
-            elif error.status_code == 429:
-                logger.exception("Ollama API rate limit exceeded")
-                raise ProviderRateLimitError(
-                    provider=self.provider_type,
-                    error=str(error),
-                ) from error
-            elif error.status_code >= 500:
-                logger.exception("Ollama server error")
-                raise ProviderConnectionError(
-                    provider=self.provider_type,
-                    message="Ollama server error",
-                    error=str(error),
-                ) from error
-            else:
-                logger.exception("Ollama API error")
-                raise ProviderAPIError(
-                    provider=self.provider_type,
-                    status_code=error.status_code,
-                    error=error.error,
-                ) from error
-        elif isinstance(error, ConnectionError):
-            logger.exception("Ollama connection error")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error=str(error),
-            ) from error
-        elif isinstance(error, TimeoutError):
-            logger.exception("Ollama request timed out")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                message="Request timed out",
-                error=str(error),
-            ) from error
-        else:
-            logger.exception("Unexpected Ollama error")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=500,
-                error=str(error),
-            ) from error
 
     async def generate_stream(
         self,
@@ -330,47 +271,6 @@ class OllamaProvider(LLMProviderBase):
                 ),
                 None,
             )
-
-    async def generate(
-        self,
-        current_message: ChatMessage,
-        model: str,
-        system_context: str,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        messages: Sequence[ChatMessage] | None = None,
-    ) -> tuple[str, int, int] | None:
-        """
-        Generate text using Ollama.
-        Returns:
-            A tuple containing (generated text, input tokens, output tokens).
-        """
-        formatted_messages = self._prepare_messages(
-            messages=messages or [], current_message=current_message, system_context=system_context
-        )
-        options = {
-            "num_predict": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-        }
-        try:
-            response = await self._client.chat(
-                model=model,
-                messages=formatted_messages,
-                options=options,
-            )
-            generated_text = response.get("message", {}).get("content", "")
-            metrics = self._get_usage_metrics(response=response)
-            # Store usage metrics
-            self._last_usage = (metrics["prompt_tokens"], metrics["completion_tokens"])
-            return (
-                generated_text,
-                metrics["prompt_tokens"],
-                metrics["completion_tokens"],
-            )
-        except Exception as error:
-            await self._handle_api_error(error)
 
     def get_token_usage(self) -> tuple[int, int]:
         """

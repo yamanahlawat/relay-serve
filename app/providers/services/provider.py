@@ -25,11 +25,17 @@ class LLMProviderService:
         return await crud_provider.create(db=self.db, obj_in=provider_in)
 
     async def list_providers(
-        self, is_active: bool | None = None, offset: int = 0, limit: int = 10
+        self,
+        is_active: bool | None = None,
+        provider_name: str | None = None,
+        offset: int = 0,
+        limit: int = 10,
     ) -> Sequence[LLMProvider]:
         filters = []
         if is_active is not None:
             filters.append(crud_provider.model.is_active == is_active)
+        if provider_name:
+            filters.append(crud_provider.model.name.ilike(f"%{provider_name}%"))
         return await crud_provider.filter(db=self.db, filters=filters, offset=offset, limit=limit)
 
     async def get_provider(self, provider_id: UUID) -> LLMProvider:
