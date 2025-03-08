@@ -3,12 +3,7 @@ from typing import AsyncGenerator, Sequence
 from uuid import UUID
 
 from anthropic import (
-    APIConnectionError,
-    APIError,
-    APIStatusError,
     AsyncAnthropic,
-    AuthenticationError,
-    RateLimitError,
 )
 from anthropic.types import ImageBlockParam, MessageParam, TextBlockParam
 from loguru import logger
@@ -23,12 +18,6 @@ from app.model_context_protocol.schemas.tools import MCPTool
 from app.providers.clients.anthropic.tool import AnthropicToolHandler
 from app.providers.clients.base import LLMProviderBase
 from app.providers.constants import ProviderType
-from app.providers.exceptions import (
-    ProviderAPIError,
-    ProviderConfigurationError,
-    ProviderConnectionError,
-    ProviderRateLimitError,
-)
 from app.providers.factory import ProviderFactory
 from app.providers.models import LLMProvider
 
@@ -284,94 +273,6 @@ class AnthropicProvider(LLMProviderBase):
                 ),
                 None,
             )
-
-    async def generate(
-        self,
-        current_message: ChatMessage,
-        model: str,
-        system_context: str,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
-        messages: Sequence[ChatMessage] | None = None,
-    ) -> tuple[str, int, int] | None:
-        """
-        Generate text using Anthropic Claude.
-
-        Returns:
-            A tuple of (generated text, input tokens, output tokens).
-        """
-        try:
-            message_params = self._prepare_messages(messages=messages or [], current_message=current_message)
-            response = await self._client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                messages=message_params,
-                system=system_context,
-            )
-
-            self._last_usage = response.usage
-            generated_text = response.content[0].text if response.content else ""
-
-            return (
-                generated_text,
-                self._last_usage.input_tokens,
-                self._last_usage.output_tokens,
-            )
-        except (
-            APIConnectionError,
-            RateLimitError,
-            AuthenticationError,
-            APIStatusError,
-            APIError,
-        ) as error:
-            self._handle_api_error(error)
-
-    def _handle_api_error(self, error: APIError) -> None:
-        """
-        Handle Anthropic API errors and raise the corresponding provider exceptions.
-        Exception chaining (using 'from error') is used to preserve the original traceback.
-        """
-        if isinstance(error, APIConnectionError):
-            logger.exception("Anthropic API connection error during generation")
-            raise ProviderConnectionError(
-                provider=self.provider_type,
-                error=str(error),
-            ) from error
-
-        elif isinstance(error, RateLimitError):
-            logger.exception("Anthropic API rate limit exceeded during generation")
-            raise ProviderRateLimitError(
-                provider=self.provider_type,
-                error=str(error),
-            ) from error
-
-        elif isinstance(error, AuthenticationError):
-            logger.exception("Anthropic authentication error during generation")
-            raise ProviderConfigurationError(
-                provider=self.provider_type,
-                message="Invalid API credentials",
-                error=str(error),
-            ) from error
-
-        elif isinstance(error, APIStatusError):
-            logger.exception("Anthropic API status error during generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=error.status_code,
-                message=error.message,
-                error=str(error),
-            ) from error
-
-        else:
-            logger.exception("Anthropic API error during generation")
-            raise ProviderAPIError(
-                provider=self.provider_type,
-                status_code=getattr(error, "status_code", 500),
-                error=str(error),
-            ) from error
 
     def get_token_usage(self) -> tuple[int, int]:
         """

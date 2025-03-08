@@ -90,6 +90,7 @@ async def list_models(
     service: LLMModelService = Depends(get_model_service),
     provider_id: UUID | None = None,
     is_active: bool | None = None,
+    model_name: str | None = None,
     offset: int = 0,
     limit: int = 10,
 ) -> Sequence[LLMModel]:
@@ -101,13 +102,20 @@ async def list_models(
     ### Parameters
     - **provider_id** (optional): Filter models by provider UUID
     - **is_active** (optional): Filter by active status
+    - **model_name** (optional): Filter models by name
     - **offset** (optional): Number of records to skip (default: 0)
     - **limit** (optional): Maximum number of records to return (default: 10)
 
     ### Returns
     List of model configurations with their details
     """
-    return await service.list_models(provider_id=provider_id, is_active=is_active, offset=offset, limit=limit)
+    return await service.list_models(
+        provider_id=provider_id,
+        is_active=is_active,
+        model_name=model_name,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get(
