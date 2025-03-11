@@ -67,8 +67,58 @@ services:
       cache:
         condition: service_healthy
 
+  ## ARMS
+  # Neo4j - Knowledge Graph Database
+  neo4j:
+    image: neo4j:latest
+    volumes:
+        - neo4j_data:/data
+        - neo4j_logs:/logs
+        - neo4j_config:/config
+        - neo4j_plugins:/plugins
+    environment:
+        - NEO4J_AUTH_FILE=/run/secrets/neo4j_auth_file
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    restart: always
+    secrets:
+      - neo4j_auth_file
+
+  # Qdrant - Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - ${QDRANT_PORT:-6333}:6333
+      - ${QDRANT_GRPC_PORT:-6334}:6334
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT_ALLOW_CREATION_ON_FILE_OF_SIZE_MB: "64"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   relay_db:
   cache_data:
   redis_insight_db:
   uploads:
+  # ARMS
+  # Neo4j - Knowledge Graph Database
+  neo4j_data:
+  neo4j_logs:
+  neo4j_config:
+  neo4j_plugins:
+  # Qdrant - Vector Database
+  qdrant_data:
+
+
+secrets:
+  neo4j_auth_file:
+    file: ./docker/neo4j_auth.txt
