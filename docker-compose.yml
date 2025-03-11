@@ -78,12 +78,30 @@ services:
         - neo4j_plugins:/plugins
     environment:
         - NEO4J_AUTH_FILE=/run/secrets/neo4j_auth_file
+        # Memory configuration
+        - NEO4J_dbms_memory_heap_initial__size=1G
+        - NEO4J_dbms_memory_heap_max__size=4G
+        - NEO4J_dbms_memory_pagecache_size=2G
+        # APOC configuration
+        - NEO4J_apoc_export_file_enabled=true
+        - NEO4J_apoc_import_file_enabled=true
+        - NEO4J_apoc_import_file_use__neo4j__config=true
+        # Security settings for plugins
+        - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+        - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
+        # Plugin installation using Neo4j's built-in utility
+        - NEO4J_PLUGINS=["apoc", "graph-data-science"]
     ports:
       - "7474:7474"
       - "7687:7687"
     restart: always
     secrets:
       - neo4j_auth_file
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS http://localhost:7474/browser/ | grep -q '<title>Neo4j Browser</title>'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Qdrant - Vector Database
   qdrant:
