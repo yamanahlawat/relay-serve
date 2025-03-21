@@ -287,7 +287,11 @@ class OpenAIProvider(LLMProviderBase):
                         has_tool_calls = True
                         for tool_id, tool_call in tool_calls.items():
                             try:
-                                parsed_args = json.loads(tool_call.arguments)
+                                parsed_args = (
+                                    tool_call.arguments
+                                    if isinstance(tool_call.arguments, dict)
+                                    else json.loads(tool_call.arguments)
+                                )
 
                                 # Update tool execution with parsed arguments
                                 if tool_id in current_tool_calls:
