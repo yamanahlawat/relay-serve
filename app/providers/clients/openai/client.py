@@ -137,6 +137,9 @@ class OpenAIProvider(LLMProviderBase):
             current_tool_calls: dict[str, ToolExecution] = {}
             stream_blocks: list[StreamBlock] = []
 
+            # Track processed tool calls to prevent duplicates
+            processed_tool_ids: set[str] = set()
+
             # Check model capabilities from llm-registry
             model_registry = CapabilityRegistry()
             try:
@@ -208,11 +211,12 @@ class OpenAIProvider(LLMProviderBase):
                     api_params["tools"] = self.tool_handler.format_tools(tools=available_tools)
                     api_params["tool_choice"] = "auto"
 
-            while True:  # Continue until all tool calls are processed
+            has_next_tool_calls = True
+            while has_next_tool_calls:  # Continue until no more tool calls are needed
                 stream = await self.stream_handler.create_completion_stream(**api_params)
-
                 current_tool_index: dict[int, str] = {}
-                has_tool_calls = False
+                has_next_tool_calls = False  # Reset for this iteration
+                pending_tool_messages = []  # Store tool messages to add after processing
 
                 async for chunk in stream:
                     if await self.stream_handler.should_cancel(session_id):
@@ -235,7 +239,7 @@ class OpenAIProvider(LLMProviderBase):
                     usage, should_stop = self.stream_handler.handle_completion(chunk)
                     if usage:
                         self._last_usage = usage
-                    if should_stop and not has_tool_calls:
+                    if should_stop and not has_next_tool_calls:
                         # Store any remaining content as final block
                         if content_chunks:
                             block = StreamBlockFactory.create_content_block(content="".join(content_chunks))
@@ -261,7 +265,7 @@ class OpenAIProvider(LLMProviderBase):
                     current_tool_index = tool_index
 
                     # Handle new tool event
-                    if tool_event:
+                    if tool_event and tool_event["id"] not in processed_tool_ids:
                         # Store accumulated content before tool execution
                         if content_chunks:
                             block = StreamBlockFactory.create_content_block(content="".join(content_chunks))
@@ -284,8 +288,12 @@ class OpenAIProvider(LLMProviderBase):
 
                     # Process tool calls one at a time
                     if chunk.choices[0].finish_reason == "tool_calls":
-                        has_tool_calls = True
+                        has_next_tool_calls = True
                         for tool_id, tool_call in tool_calls.items():
+                            # Skip already processed tool calls
+                            if tool_id in processed_tool_ids:
+                                continue
+
                             try:
                                 parsed_args = (
                                     tool_call.arguments
@@ -318,12 +326,12 @@ class OpenAIProvider(LLMProviderBase):
                                 if tool_id in current_tool_calls:
                                     current_tool_calls[tool_id].result = formatted_result
 
-                                # Add this tool's messages to conversation
+                                # Prepare tool messages to add to conversation after this loop
                                 tool_messages = self.tool_handler.format_tool_messages(
                                     tool_call=tool_call,
                                     result=formatted_result,
                                 )
-                                conversation_messages.extend(tool_messages)
+                                pending_tool_messages.extend(tool_messages)
 
                                 block = StreamBlockFactory.create_tool_result_block(
                                     tool_result=tool_result.content,
@@ -337,6 +345,9 @@ class OpenAIProvider(LLMProviderBase):
                                     content=f"Processing {tool_call.name} results..."
                                 )
                                 yield block, None
+
+                                # Mark this tool as processed
+                                processed_tool_ids.add(tool_id)
 
                             except json.JSONDecodeError as e:
                                 error_msg = f"Invalid tool arguments format: {str(e)}"
@@ -364,9 +375,16 @@ class OpenAIProvider(LLMProviderBase):
                                 )
                                 continue
 
+                        # Only update conversation messages after processing all tools in this batch
+                        if pending_tool_messages:
+                            conversation_messages.extend(pending_tool_messages)
+                            api_params["messages"] = conversation_messages
+
+                        # Break inner loop to get a new stream with updated messages
                         break
 
-                if not has_tool_calls:
+                # If no more tool calls detected, exit the outer loop
+                if not has_next_tool_calls:
                     break
 
             # Final yield with completion metadata
