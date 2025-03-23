@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import AsyncGenerator, Sequence
 from uuid import UUID, uuid4
 
+from llm_registry import CapabilityRegistry, ModelCapabilities, ModelNotFoundError
 from loguru import logger
 from ollama import AsyncClient, Image, Message
 
@@ -52,6 +53,8 @@ class OllamaProvider(LLMProviderBase):
         messages: Sequence[ChatMessage],
         current_message: ChatMessage,
         system_context: str,
+        model: str,
+        model_capabilities: ModelCapabilities | None = None,
     ) -> list[Message]:
         """
         Prepare message history for the Ollama API.
@@ -59,10 +62,21 @@ class OllamaProvider(LLMProviderBase):
             messages: Previous messages in the conversation.
             current_message: Current message to process.
             system_context: System context to send as a system message.
+            model: The model being used.
+            model_capabilities: Model capabilities from llm-registry.
         Returns:
             A list of formatted messages for the Ollama API.
         """
-        formatted_messages = [Message(role="system", content=system_context)]
+        formatted_messages = []
+
+        # Handle system prompt based on model capabilities
+        if system_context:
+            if model_capabilities and not model_capabilities.features.system_prompt:
+                logger.warning(f"Model {model} does not support system prompt, adding as user message")
+                formatted_messages.append(Message(role="user", content=system_context))
+            else:
+                # If capabilities unknown or system prompts supported, use system message
+                formatted_messages.append(Message(role="system", content=system_context))
 
         # Format history messages
         for message in messages:
@@ -71,9 +85,16 @@ class OllamaProvider(LLMProviderBase):
 
         # Format current message with any attachments
         message_images = []
-        for attachment in current_message.direct_attachments:
-            if attachment.type == AttachmentType.IMAGE.value:
-                message_images.append(Image(value=attachment.storage_path))
+
+        # Only add images if model supports vision or capabilities unknown
+        if model_capabilities is None or model_capabilities.features.vision:
+            for attachment in current_message.direct_attachments:
+                if attachment.type == AttachmentType.IMAGE.value:
+                    message_images.append(Image(value=attachment.storage_path))
+        elif current_message.direct_attachments and any(
+            attachment.type == AttachmentType.IMAGE.value for attachment in current_message.direct_attachments
+        ):
+            logger.warning(f"Model {model} does not support vision, skipping image attachments")
 
         formatted_messages.append(
             Message(
@@ -107,28 +128,73 @@ class OllamaProvider(LLMProviderBase):
             stream_blocks: list[StreamBlock] = []
             conversation_messages = []
 
+            # Check model capabilities from llm-registry
+            model_registry = CapabilityRegistry()
+            try:
+                model_capabilities = model_registry.get_model(model_id=model.lower())
+                logger.info(f"Found capabilities for model {model} in registry")
+            except ModelNotFoundError:
+                model_capabilities = None
+
             # Format initial messages
             formatted_messages = self._prepare_messages(
                 messages=messages or [],
                 current_message=current_message,
                 system_context=system_context,
+                model=model,
+                model_capabilities=model_capabilities,
             )
             conversation_messages.extend(formatted_messages)
 
-            # Format tools if available
-            tools_payload = self.tool_handler.format_tools(tools=available_tools) if available_tools else None
+            # Build options based on model capabilities
+            options = {}
 
-            options = {
-                "num_predict": max_tokens,
-                "temperature": temperature,
-                "top_p": top_p,
-            }
+            if model_capabilities:
+                # Only include parameters that are supported by the model
+                if model_capabilities.api_params.max_tokens:
+                    options["num_predict"] = max_tokens
+                else:
+                    logger.warning(f"Model {model} does not support max_tokens")
+
+                if model_capabilities.api_params.temperature:
+                    options["temperature"] = temperature
+                else:
+                    logger.warning(f"Model {model} does not support temperature")
+
+                if model_capabilities.api_params.top_p:
+                    options["top_p"] = top_p
+                else:
+                    logger.warning(f"Model {model} does not support top_p")
+
+                # Streaming is handled separately in the client call
+            else:
+                # If model not in registry, pass all parameters
+                logger.warning(f"Model {model} capabilities not found in registry, passing all parameters")
+                options = {
+                    "num_predict": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+
+            # Format tools if available and supported by the model
+            tools_payload = None
+            if available_tools:
+                if model_capabilities is None or model_capabilities.features.tools:
+                    tools_payload = self.tool_handler.format_tools(tools=available_tools)
+                else:
+                    logger.warning(f"Model {model} does not support tools, skipping tool-related parameters")
 
             while True:
+                # Check if streaming is supported
+                stream_enabled = True
+                if model_capabilities and not model_capabilities.api_params.stream:
+                    logger.warning(f"Model {model} does not support streaming")
+                    stream_enabled = False  # Don't attempt streaming if not supported
+
                 stream = await self._client.chat(
                     model=model,
                     messages=conversation_messages,
-                    stream=True,
+                    stream=stream_enabled,
                     options=options,
                     tools=tools_payload,
                 )
