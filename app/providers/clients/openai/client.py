@@ -145,7 +145,6 @@ class OpenAIProvider(LLMProviderBase):
             try:
                 model_capabilities = model_registry.get_model(model_id=model.lower())
             except ModelNotFoundError:
-                logger.exception(f"Model {model} capabilities not found in registry")
                 model_capabilities = None
 
             formatted_messages = self._prepare_messages(
