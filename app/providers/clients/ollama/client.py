@@ -132,7 +132,6 @@ class OllamaProvider(LLMProviderBase):
             model_registry = CapabilityRegistry()
             try:
                 model_capabilities = model_registry.get_model(model_id=model.lower())
-                logger.info(f"Found capabilities for model {model} in registry")
             except ModelNotFoundError:
                 model_capabilities = None
 
