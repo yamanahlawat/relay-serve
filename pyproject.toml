@@ -9,33 +9,34 @@ dependencies = [
     "asyncpg>=0.30.0",
     "fastapi[standard]>=0.115.12",
     "pydantic>=2.11.3",
-    "pydantic-settings>=2.8.1",
+    "pydantic-settings>=2.9.1",
     "sqlalchemy>=2.0.40",
-    "greenlet>=3.1.1",
+    "greenlet>=3.2.1",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.25.1",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.27.0",
     "redis[hiredis]>=5.2.1",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
-    "pillow>=11.1.0",
+    "pillow>=11.2.1",
     "pybase64>=1.4.1",
     "mcp[cli]>=1.6.0",
     "llm-registry>=0.3.3",
+    "ipdb>=0.13.13",
 ]
 
 [dependency-groups]
 providers = [
-    "anthropic>=0.49.0",
-    "ollama>=0.4.7",
-    "openai>=1.72.0",
+    "anthropic>=0.50.0",
+    "ollama>=0.4.8",
+    "openai>=1.76.0",
 ]
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.2.0",
-    "ruff>=0.11.5",
+    "ruff>=0.11.7",
     "tomli-w>=1.2.0",
 ]
 mcp-servers = [
     "mcp-server-time>=0.6.2",
-    "mcp-tavily>=0.1.6",
+    "mcp-tavily>=0.1.8",
 ]
