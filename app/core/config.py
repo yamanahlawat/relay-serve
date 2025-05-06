@@ -51,7 +51,7 @@ class RedisSettings(BaseSettings):
             scheme="redis",
             host=values.get("HOST", ""),
             port=values.get("PORT"),
-            path=f"/{values.get('DB')}",
+            path=str(values.get("DB")),
         )
 
 
