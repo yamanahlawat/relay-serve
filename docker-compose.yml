@@ -11,8 +11,11 @@ services:
     volumes:
       - ./:/src
       - uploads:/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - ${RELAY_PORT:-8000}:8000
+    networks:
+      - relay_network
     depends_on:
       relay_db:
         condition: service_healthy
@@ -33,6 +36,8 @@ services:
       - ${DATABASE__PORT:-5420}:5432
     volumes:
       - relay_db:/var/lib/postgresql/data
+    networks:
+      - relay_network
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${DATABASE__USER:-relay_user}", "-d", "${DATABASE__DB:-relay_db}"]
       interval: 10s
@@ -49,6 +54,8 @@ services:
       - ${CACHE_PORT:-6379}:6379
     volumes:
       - cache_data:/data
+    networks:
+      - relay_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -63,6 +70,8 @@ services:
     volumes:
       - redis_insight_db:/db
     restart: always
+    networks:
+      - relay_network
     depends_on:
       cache:
         condition: service_healthy
@@ -97,6 +106,8 @@ services:
     restart: always
     secrets:
       - neo4j_auth_file
+    networks:
+      - relay_network
     healthcheck:
       test: ["CMD-SHELL", "curl -sS http://localhost:7474/browser/ | grep -q '<title>Neo4j Browser</title>'"]
       interval: 10s
@@ -116,6 +127,8 @@ services:
       - qdrant_data:/qdrant/storage
     environment:
       QDRANT_ALLOW_CREATION_ON_FILE_OF_SIZE_MB: "64"
+    networks:
+      - relay_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
       interval: 10s
@@ -140,3 +153,8 @@ volumes:
 secrets:
   neo4j_auth_file:
     file: ./docker/neo4j_auth.txt
+
+
+networks:
+  relay_network:
+    driver: bridge
