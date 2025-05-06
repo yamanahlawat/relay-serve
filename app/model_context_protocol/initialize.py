@@ -3,60 +3,28 @@ from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfi
 from app.model_context_protocol.services.registry import MCPServerRegistry
 
 MCP_SERVERS = {
-    # Useful
+    # Direct subprocess execution (original implementation)
     "tavily-search": {
         "command": "python",
         "args": [
             "-m",
             "mcp_server_tavily",
-            "--api-key",
-            settings.TAVILY_SEARCH_API_KEY.get_secret_value() if settings.TAVILY_SEARCH_API_KEY else "",
         ],
+        "env": {
+            "TAVILY_API_KEY": settings.TAVILY_SEARCH_API_KEY.get_secret_value(),
+        },
+        "enabled": False,
+    },
+    # Docker-based MCP servers using docker_image helper
+    # Docker MCP Toolkit Gateway
+    "docker-mcp-gateway": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "alpine/socat", "STDIO", "TCP:host.docker.internal:8811"],
         "enabled": True,
-    },
-    "puppeteer": {
-        "command": "npx",
-        "args": [
-            "-y",
-            "@modelcontextprotocol/server-puppeteer",
-            "--headless",
-            "true",
-        ],
-        "enabled": False,
-    },
-    "sentry": {
-        "command": "uvx",
-        "args": [
-            "mcp-server-sentry",
-            "--auth-token",
-            settings.SENTRY_AUTH_TOKEN.get_secret_value(),
-        ],
-        "enabled": False,
-    },
-    "memory": {
-        "command": "npx",
-        "args": [
-            "-y",
-            "@modelcontextprotocol/server-memory",
-        ],
-        "enabled": False,
-    },
-    "sequential-thinking": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-        "enabled": False,
-    },
-    # Testing
-    "everything": {
-        "command": "npx",
-        "args": [
-            "-y",
-            "@modelcontextprotocol/server-everything",
-        ],
-        "enabled": False,
     },
 }
 
+# Create the MCP configuration
 mcp_config = MCPConfig(servers={key: MCPServerConfig(**value) for key, value in MCP_SERVERS.items()})
 
 # Instantiate the MCP Server Registry
