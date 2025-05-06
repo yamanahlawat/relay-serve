@@ -1,16 +1,11 @@
+ARG PYTHON_VERSION=3.13-slim
 # =========================================================================
 # Stage 1: Builder Stage
 # =========================================================================
 # Use the official Python image as a base for the builder
-FROM python:3.13-slim AS builder
+FROM python:${PYTHON_VERSION} AS builder
 
 # Set environment variables for the build stage
-# - PYTHONDONTWRITEBYTECODE: Prevents Python from writing .pyc files.
-# - PYTHONUNBUFFERED: Forces Python stdout/stderr streams to be unbuffered.
-# - UV_*: Configuration for the 'uv' package installer.
-#   - UV_COMPILE_BYTECODE=1: Compile bytecode during installation.
-#   - UV_LINK_MODE=copy: Use copy mode for linking packages.
-#   - UV_PROJECT_ENVIRONMENT=/usr/local: Install packages system-wide (matching final stage).
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -22,8 +17,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /src
 
 # Install build-time system dependencies and uv in a single layer
-# - Installs: git, wget, openssh-client, gcc, python3-dev (needed for compiling some Python packages)
-# - Cleans up apt cache afterward to reduce layer size.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        git \
@@ -41,15 +34,13 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies using uv
-# Installs packages from specified groups system-wide (--system)
-# This includes development dependencies as they might be needed for building the final application code
 RUN uv sync --group dev --group providers --group mcp-servers
 
 # =========================================================================
 # Stage 2: Final Stage
 # =========================================================================
 # Use the same slim Python image for the final stage
-FROM python:3.13-slim
+FROM python:${PYTHON_VERSION}
 
 # Set environment variables for the final runtime image
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -96,7 +87,6 @@ RUN apt-get update \
 COPY --from=builder /usr/local /usr/local
 
 # Copy the application source code
-# This comes after installing dependencies to better leverage Docker cache
 COPY . .
 
 # Ensure the entrypoint script is executable
