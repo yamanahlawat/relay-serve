@@ -1,7 +1,16 @@
-# Use the official Python image from the Docker Hub
-FROM python:3.13-slim
+# =========================================================================
+# Stage 1: Builder Stage
+# =========================================================================
+# Use the official Python image as a base for the builder
+FROM python:3.13-slim AS builder
 
-# Set environment variables
+# Set environment variables for the build stage
+# - PYTHONDONTWRITEBYTECODE: Prevents Python from writing .pyc files.
+# - PYTHONUNBUFFERED: Forces Python stdout/stderr streams to be unbuffered.
+# - UV_*: Configuration for the 'uv' package installer.
+#   - UV_COMPILE_BYTECODE=1: Compile bytecode during installation.
+#   - UV_LINK_MODE=copy: Use copy mode for linking packages.
+#   - UV_PROJECT_ENVIRONMENT=/usr/local: Install packages system-wide (matching final stage).
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -9,35 +18,89 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/usr/local \
     PYTHONPATH=/src
 
-# Set a directory for the src
+# Set the working directory
 WORKDIR /src
 
-# Install system dependencies including gcc and python3-dev
+# Install build-time system dependencies and uv in a single layer
+# - Installs: git, wget, openssh-client, gcc, python3-dev (needed for compiling some Python packages)
+# - Cleans up apt cache afterward to reduce layer size.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git wget openssh-client gcc python3-dev libgl1-mesa-dev libglib2.0-0 \
+    && apt-get install -y --no-install-recommends \
+       git \
+       wget \
+       openssh-client \
+       gcc \
+       python3-dev \
+    # Install uv using pip
+    && pip install uv \
+    # Clean up apt cache
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the latest Node.js LTS version using NodeSource
-RUN wget -qO- https://deb.nodesource.com/setup_lts.x | bash - \
-&& apt-get install -y nodejs \
-&& apt-get clean \
-&& rm -rf /var/lib/apt/lists/*
-
-# Install uv
-RUN pip install uv
-
-# Copy dependency files first to leverage Docker cache
+# Copy only the dependency definition files first to leverage Docker cache
 COPY pyproject.toml uv.lock ./
 
-# Install project dependencies without installing the project itself
+# Install Python dependencies using uv
+# Installs packages from specified groups system-wide (--system)
+# This includes development dependencies as they might be needed for building the final application code
 RUN uv sync --group dev --group providers --group mcp-servers
 
-# Copy the content of the local src directory to the working directory
+# =========================================================================
+# Stage 2: Final Stage
+# =========================================================================
+# Use the same slim Python image for the final stage
+FROM python:3.13-slim
+
+# Set environment variables for the final runtime image
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    PYTHONPATH=/src
+
+# Set the working directory
+WORKDIR /src
+
+# Install runtime system dependencies, Docker CLI, and Node.js in a single layer
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       # Runtime dependencies from original Dockerfile
+       libgl1-mesa-dev \
+       libglib2.0-0 \
+       # Dependencies required for Docker CLI and Node.js installation
+       apt-transport-https \
+       ca-certificates \
+       curl \
+       gnupg \
+    # Install Docker CLI
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo \
+       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+       tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    # Install Node.js LTS using NodeSource
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    # Update apt list again after adding new repositories
+    && apt-get update \
+    # Install Docker CLI and Node.js
+    && apt-get install -y --no-install-recommends \
+       docker-ce-cli \
+       nodejs \
+    # Clean up apt cache and remove temporary files
+    && apt-get purge -y --auto-remove apt-transport-https ca-certificates curl gnupg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/nodesource.list
+
+# Copy the installed Python environment (packages) from the builder stage
+COPY --from=builder /usr/local /usr/local
+
+# Copy the application source code
+# This comes after installing dependencies to better leverage Docker cache
 COPY . .
 
 # Ensure the entrypoint script is executable
 RUN chmod +x /src/docker/entrypoint.sh
 
-# Set the entrypoint
+# Set the entrypoint for the container
 ENTRYPOINT ["/src/docker/entrypoint.sh"]
