@@ -2,6 +2,7 @@ from typing import Sequence
 
 from loguru import logger
 
+from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.exceptions import MCPToolError
 from app.model_context_protocol.initialize import mcp_registry
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
@@ -53,29 +54,33 @@ class MCPToolService:
         Raises:
             MCPToolError: If tool execution fails
         """
-        # Get tool metadata
-        tool = self._tool_cache.get(tool_call.name)
-        if not tool:
-            # Refresh cache and try again
-            await self.get_available_tools(refresh=True)
+        async with AsyncSessionLocal() as db:
+            # Get tool metadata
             tool = self._tool_cache.get(tool_call.name)
             if not tool:
-                raise MCPToolError(f"Tool {tool_call.name} not found")
+                # Refresh cache and try again
+                await self.get_available_tools(refresh=True)
+                tool = self._tool_cache.get(tool_call.name)
+                if not tool:
+                    raise MCPToolError(f"Tool {tool_call.name} not found")
 
-        logger.info(f"Executing tool: {tool_call.name} with arguments: {tool_call.arguments}")
-        # Get server session
-        session = await self.registry.get_server_session(tool.server_name)
+            logger.info(f"Executing tool: {tool_call.name} with arguments: {tool_call.arguments}")
+            # Get server session
+            session = await self.registry.get_server_session(db, tool.server_name)
 
-        # Execute tool
-        result = await session.call_tool(name=tool_call.name, arguments=tool_call.arguments)
+            # Execute tool
+            result = await session.call_tool(name=tool_call.name, arguments=tool_call.arguments)
 
-        logger.info(f"Got tool results for tool: {tool_call.name}")
+            logger.info(f"Got tool results for tool: {tool_call.name}")
 
-        return ToolResult(content=result.content, call_id=tool_call.call_id)
+            return ToolResult(content=result.content, call_id=tool_call.call_id)
 
     async def refresh_tools(self) -> None:
         """
         Force refresh the tool cache.
+        Args:
+            db: Database session (optional if provided at initialization)
         """
+        # Clear the tool cache
         self._tool_cache.clear()
         await self.get_available_tools(refresh=True)

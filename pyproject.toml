@@ -27,7 +27,7 @@ dependencies = [
 
 [dependency-groups]
 providers = [
-    "anthropic>=0.50.0",
+    "anthropic>=0.51.0",
     "ollama>=0.4.8",
     "openai>=1.77.0",
 ]

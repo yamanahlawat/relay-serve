@@ -1,11 +1,15 @@
-from pydantic import BaseModel, Field
+import datetime
+from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from app.model_context_protocol.constants import ServerStatus
 from app.model_context_protocol.schemas.tools import BaseTool
 
 
-class MCPServerConfig(BaseModel):
+class MCPServerBase(BaseModel):
     """
-    Individual MCP server configuration.
+    Base schema for MCP server common attributes
 
     This class supports both direct command execution and Docker-based MCP servers.
     For Docker-based servers, the command should be 'docker' and args should include
@@ -26,30 +30,65 @@ class MCPServerConfig(BaseModel):
        env: {"API_KEY": "your-api-key"}
     """
 
-    command: str
-    args: list[str]
-    enabled: bool = True
-    env: dict[str, str] | None = None
+    command: str = Field(description="Command to execute")
+    args: list[str] = Field(description="Arguments passed to command")
+    enabled: bool = Field(default=True, description="Whether server is enabled")
+    env: dict[str, SecretStr] | None = Field(default=None, description="Environment variables")
 
 
-class MCPConfig(BaseModel):
+class MCPServerCreate(MCPServerBase):
     """
-    Global MCP configuration.
+    Schema for creating a new MCP server
     """
 
-    servers: dict[str, MCPServerConfig] = Field(
-        default_factory=dict,
-        description="Map of server names to their configurations",
-    )
+    name: str = Field(description="Unique name for the server")
 
-    @property
-    def enabled_servers(self) -> dict[str, MCPServerConfig]:
-        """
-        Get only enabled servers.
-        """
-        return {name: config for name, config in self.servers.items() if config.enabled}
+
+class MCPServerUpdate(MCPServerBase):
+    """
+    Schema for updating an existing MCP server
+    """
+
+    command: str | None = Field(default=None, description="Command to execute")
+    args: list[str] | None = Field(default=None, description="Arguments passed to command")
+    enabled: bool | None = Field(default=None, description="Whether server is enabled")
+
+
+class MCPServerInDB(MCPServerBase):
+    """
+    Schema for MCP server stored in database
+    """
+
+    name: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MCPServerResponse(MCPServerInDB):
+    """
+    Schema for MCP server response
+    """
+
+    status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
+    available_tools: list[dict[str, Any]] = Field(default_factory=list, description="Available tools from this server")
+
+
+class MCPServerToggleResponse(BaseModel):
+    """
+    Response schema for toggling a server
+    """
+
+    name: str
+    enabled: bool
+    status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
 
 
 class MCPServerTools(BaseModel):
+    """
+    Schema for grouping tools by server
+    """
+
     name: str
     tools: list[BaseTool]

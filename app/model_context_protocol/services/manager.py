@@ -6,7 +6,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from app.model_context_protocol.exceptions import MCPServerError
-from app.model_context_protocol.schemas.servers import MCPServerConfig
+from app.model_context_protocol.schemas.servers import MCPServerBase
 
 
 class MCPServerManager:
@@ -18,7 +18,7 @@ class MCPServerManager:
         self.exit_stack = AsyncExitStack()
         self._sessions: dict[str, ClientSession] = {}
 
-    async def start_server(self, server_name: str, config: MCPServerConfig) -> ClientSession:
+    async def start_server(self, server_name: str, config: MCPServerBase) -> ClientSession:
         """
         Start an MCP server and return its session.
         """
@@ -28,7 +28,7 @@ class MCPServerManager:
             logger.exception(f"Failed to start MCP server {server_name}")
             raise MCPServerError(f"Failed to start server: {error}")
 
-    async def _start_command_server(self, server_name: str, config: MCPServerConfig) -> ClientSession:
+    async def _start_command_server(self, server_name: str, config: MCPServerBase) -> ClientSession:
         """
         Start an MCP server using direct command execution and return its session.
         """
@@ -36,8 +36,9 @@ class MCPServerManager:
         # If env is provided, merge it with the current environment instead of replacing it
         server_env = None
         if config.env:
-            # Preserve the current environment and update with the provided env variables
-            server_env = {**os.environ, **config.env}
+            # Extract secret values from SecretStr objects and preserve the current environment
+            extracted_env = {key: value.get_secret_value() for key, value in config.env.items()}
+            server_env = {**os.environ, **extracted_env}
 
         server_params = StdioServerParameters(command=config.command, args=config.args, env=server_env)
 
@@ -69,6 +70,36 @@ class MCPServerManager:
         Get all active server sessions.
         """
         return self._sessions
+
+    async def shutdown_server(self, name: str) -> None:
+        """
+        Shutdown a specific MCP server by name.
+
+        Args:
+            name: Name of the server to shut down
+        """
+        session = self._sessions.get(name)
+        if not session:
+            logger.warning(f"Attempted to shut down non-running server: {name}")
+            return
+
+        try:
+            # The session is managed by the exit_stack, so we need to remove it
+            # from our sessions dict before it's closed by the exit_stack
+            self._sessions.pop(name, None)
+
+            # Since we registered the session with exit_stack in _start_command_server,
+            # we can't directly close it here. Instead, we need to rely on the exit_stack
+            # to close it when the application shuts down.
+            #
+            # If we need immediate cleanup, we would need to track the exit_stack context
+            # for each session and close it individually.
+
+            logger.info(f"Removed MCP server {name} from active sessions")
+        except Exception as e:
+            logger.error(f"Error shutting down MCP server {name}: {e}")
+            # Still remove from sessions dict even if there's an error
+            self._sessions.pop(name, None)
 
     async def shutdown(self) -> None:
         """
