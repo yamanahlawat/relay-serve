@@ -65,5 +65,4 @@ class ModelsByProvider(RootModel[dict[str, list[ModelRead]]]):
         RootModel (dict[str, list[ModelRead]]): Root model for models grouped by provider
     """
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
