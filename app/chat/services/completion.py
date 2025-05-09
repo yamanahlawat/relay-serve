@@ -12,7 +12,7 @@ from app.chat.schemas.message import MessageRead, MessageUsage
 from app.chat.services import ChatSessionService
 from app.chat.services.message import ChatMessageService
 from app.database.session import AsyncSessionLocal
-from app.model_context_protocol.services.tool import MCPToolService
+from app.model_context_protocol.services.tool_execution import MCPToolExecutionService
 from app.providers.clients import AnthropicProvider, OllamaProvider, OpenAIProvider
 from app.providers.clients.base import LLMProviderBase
 from app.providers.exceptions.client import ProviderAPIError, ProviderConnectionError, ProviderRateLimitError
@@ -30,7 +30,7 @@ class ChatCompletionService:
         provider_factory: ProviderFactory,
     ) -> None:
         self.provider_factory = provider_factory
-        self.mcp_service = MCPToolService()
+        self.mcp_service = MCPToolExecutionService()
 
     async def validate_request(
         self,

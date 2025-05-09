@@ -1,7 +1,7 @@
 """
-MCP Server Initialization Service
+MCP Server Bootstrap Service
 
-This service is responsible for initializing MCP servers from the database
+This service is responsible for bootstrapping MCP servers from the database
 or seeding default configurations if the database is empty.
 """
 
@@ -10,21 +10,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.crud.server import crud_mcp_server
-from app.model_context_protocol.initialize import MCP_SERVERS, mcp_registry
+from app.model_context_protocol.initialize import MCP_SERVERS, mcp_lifecycle_manager
 from app.model_context_protocol.schemas.servers import MCPServerCreate
 
 
-class MCPInitializationService:
+class MCPBootstrapService:
     """
-    Service for initializing MCP servers.
+    Service for bootstrapping MCP servers.
 
-    Follows domain-driven design principles by encapsulating the initialization
-    logic in a dedicated service class.
+    Responsible for initializing the MCP system, including seeding default
+    configurations and starting enabled servers during application startup.
     """
 
-    async def initialize_servers(self) -> None:
+    def __init__(self) -> None:
+        self.lifecycle_manager = mcp_lifecycle_manager
+
+    async def bootstrap(self) -> None:
         """
-        Initialize MCP servers from database or seed defaults.
+        Bootstrap MCP servers from database or seed defaults.
 
         This method:
         1. Checks if there are any server configurations in the database
@@ -32,11 +35,11 @@ class MCPInitializationService:
         3. Starts enabled servers
         """
         async with AsyncSessionLocal() as db:
-            await self._do_initialize(db)
+            await self._do_bootstrap(db)
 
-    async def _do_initialize(self, db: AsyncSession) -> None:
+    async def _do_bootstrap(self, db: AsyncSession) -> None:
         """
-        Internal method to perform the actual initialization with a database session.
+        Internal method to perform the actual bootstrapping with a database session.
 
         Args:
             db: Database session
@@ -63,13 +66,13 @@ class MCPInitializationService:
                 except Exception as e:
                     logger.error(f"Failed to create MCP server {name}: {e}")
 
-        # Start enabled servers using the registry
+        # Start enabled servers using the lifecycle manager
         try:
-            await mcp_registry.start_enabled_servers()
+            await self.lifecycle_manager.start_enabled_servers()
             logger.info("Started enabled MCP servers")
         except Exception as e:
             logger.error(f"Failed to start MCP servers: {e}")
 
 
 # Create a singleton instance of the service
-mcp_init_service = MCPInitializationService()
+mcp_bootstrap_service = MCPBootstrapService()

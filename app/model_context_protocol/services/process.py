@@ -9,9 +9,13 @@ from app.model_context_protocol.exceptions import MCPServerError
 from app.model_context_protocol.schemas.servers import MCPServerBase
 
 
-class MCPServerManager:
+class MCPProcessManager:
     """
-    Manages MCP server lifecycle - starting, stopping, and health checks.
+    Manages MCP server processes - starting, stopping, and monitoring.
+
+    This service is focused purely on process execution and management,
+    with no knowledge of domain concepts beyond what's needed for execution.
+    It handles the low-level details of process management.
     """
 
     def __init__(self) -> None:
@@ -20,7 +24,7 @@ class MCPServerManager:
 
     async def start_server(self, server_name: str, config: MCPServerBase) -> ClientSession:
         """
-        Start an MCP server and return its session.
+        Start an MCP server process and return its session.
         """
         try:
             return await self._start_command_server(server_name, config)
@@ -73,7 +77,7 @@ class MCPServerManager:
 
     async def shutdown_server(self, name: str) -> None:
         """
-        Shutdown a specific MCP server by name.
+        Shutdown a specific MCP server process by name.
 
         Args:
             name: Name of the server to shut down
@@ -103,7 +107,7 @@ class MCPServerManager:
 
     async def shutdown(self) -> None:
         """
-        Shutdown all MCP servers and Docker containers.
+        Shutdown all MCP server processes.
         """
         # Close all server sessions
         await self.exit_stack.aclose()

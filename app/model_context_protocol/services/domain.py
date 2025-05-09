@@ -4,9 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.exceptions import MCPServerError
-from app.model_context_protocol.initialize import mcp_registry
+from app.model_context_protocol.initialize import mcp_lifecycle_manager
 from app.model_context_protocol.schemas.servers import (
-    MCPServerBase,
     MCPServerResponse,
     MCPServerToggleResponse,
     MCPServerUpdate,
@@ -15,16 +14,18 @@ from app.model_context_protocol.schemas.servers import (
 from app.model_context_protocol.schemas.tools import MCPTool
 
 
-class MCPServerService:
+class MCPServerDomainService:
     """
-    Service for managing MCP server configurations.
+    Domain service for MCP server operations.
 
-    In the JSON-driven approach, servers are configured in the DEFAULT_MCP_SERVERS dictionary
-    in initialize.py. This service provides methods to view server status and toggle enabled state.
+    This service handles domain operations and business logic for MCP servers,
+    focusing on database interactions and API-level operations. It uses the
+    MCPServerLifecycleManager for runtime operations.
     """
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        self.lifecycle_manager = mcp_lifecycle_manager
 
     async def list_active_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
         """
@@ -43,7 +44,7 @@ class MCPServerService:
         )
 
         # Get running servers to determine status
-        running_servers = await mcp_registry.get_running_servers()
+        running_servers = await self.lifecycle_manager.get_running_servers()
 
         response = []
         for server in servers:
@@ -106,32 +107,32 @@ class MCPServerService:
         # Update the server in database
         updated = await crud_mcp_server.update(db=self.db, id=server_id, obj_in=update_data)
 
-        # Create config for server operations
-        config = MCPServerBase(
-            command=updated.command,
-            args=updated.args,
-            enabled=updated.enabled,
-            env=updated.env,
-        )
-
-        # Start or stop the server based on new enabled status
-        running_servers = await mcp_registry.get_running_servers()
+        # Get running servers to determine status
+        running_servers = await self.lifecycle_manager.get_running_servers()
         status = ServerStatus.UNKNOWN
 
+        # Update server runtime state based on new enabled status
         if updated.enabled:
-            # Start server if not running
+            # Server should be running
             if updated.name not in running_servers:
                 try:
-                    await mcp_registry.manager.start_server(server_name=updated.name, config=config)
-                    status = ServerStatus.RUNNING
+                    # Get server config and start it
+                    config = await self.lifecycle_manager.get_server_config(self.db, updated.name)
+                    if config:
+                        await self.lifecycle_manager.process_manager.start_server(
+                            server_name=updated.name, config=config
+                        )
+                        status = ServerStatus.RUNNING
+                    else:
+                        status = ServerStatus.ERROR
                 except Exception:
                     status = ServerStatus.ERROR
             else:
                 status = ServerStatus.RUNNING
         else:
-            # Stop server if running
+            # Server should be stopped
             if updated.name in running_servers:
-                await mcp_registry.manager.shutdown_server(updated.name)
+                await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
             status = ServerStatus.STOPPED
 
         return MCPServerToggleResponse(

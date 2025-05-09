@@ -41,7 +41,7 @@ the database if no server configurations exist.
 """
 
 from app.core.config import settings
-from app.model_context_protocol.services.registry import MCPServerRegistry
+from app.model_context_protocol.services.lifecycle import MCPServerLifecycleManager
 
 MCP_SERVERS = {
     # Docker-based MCP Toolkit Gateway
@@ -78,5 +78,5 @@ MCP_SERVERS = {
     },
 }
 
-# Instantiate the MCP Server Registry
-mcp_registry = MCPServerRegistry()
+# Instantiate the MCP Server Lifecycle Manager
+mcp_lifecycle_manager = MCPServerLifecycleManager()
