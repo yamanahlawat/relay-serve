@@ -6,7 +6,7 @@ from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from app.chat.schemas.stream import ToolExecution
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
-from app.model_context_protocol.services.tool_execution import MCPToolExecutionService
+from app.model_context_protocol.services.tool_execution import mcp_tool_service
 from app.providers.clients.openai.schemas import OpenAIFunction, OpenAIFunctionParameters, OpenAITool
 
 
@@ -16,7 +16,7 @@ class OpenAIToolHandler:
     """
 
     def __init__(self) -> None:
-        self.mcp_service = MCPToolExecutionService()
+        self.mcp_service = mcp_tool_service
 
     def format_tools(self, tools: Sequence[MCPTool]) -> list[dict]:
         """

@@ -78,14 +78,6 @@ class MCPToolExecutionService:
 
             return ToolResult(content=result.content, call_id=tool_call.call_id)
 
-    async def refresh_tools(self) -> None:
-        """
-        Force refresh the tool cache.
-        """
-        # Clear the tool cache
-        self._tool_cache.clear()
-        await self.get_available_tools(refresh=True)
-
 
 # Create a singleton instance of the service
 mcp_tool_service = MCPToolExecutionService()

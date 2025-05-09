@@ -27,14 +27,14 @@ class MCPServerDomainService:
         self.db = db
         self.lifecycle_manager = mcp_lifecycle_manager
 
-    async def list_active_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
+    async def list_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
         """
-        List only active (running) MCP servers with their status and available tools.
+        List all configured MCP servers with their status and available tools.
         Args:
             offset: Number of items to skip
             limit: Maximum number of items to return
         Returns:
-            List of active server responses with status and tools
+            List of all server responses with status and tools
         """
         # Get all servers from DB
         servers = await crud_mcp_server.filter(
@@ -48,31 +48,34 @@ class MCPServerDomainService:
 
         response = []
         for server in servers:
-            # Skip servers that are not running
-            if server.name not in running_servers:
-                continue
-
             # Get available tools for running server
             available_tools = []
-            session = running_servers[server.name]
-            try:
-                tools_response = await session.list_tools()
-                available_tools = [
-                    MCPTool(
-                        name=tool.name,
-                        description=tool.description,
-                        server_name=server.name,
-                        input_schema=tool.inputSchema,
-                    )
-                    for tool in tools_response.tools
-                ]
-            except Exception:
-                pass  # Ignore errors when fetching tools
+            status = ServerStatus.STOPPED
+
+            # Check if server is running and get tools if it is
+            if server.name in running_servers:
+                status = ServerStatus.RUNNING
+                session = running_servers[server.name]
+                try:
+                    tools_response = await session.list_tools()
+                    available_tools = [
+                        MCPTool(
+                            name=tool.name,
+                            description=tool.description,
+                            server_name=server.name,
+                            input_schema=tool.inputSchema,
+                        )
+                        for tool in tools_response.tools
+                    ]
+                except Exception:
+                    pass  # Ignore errors when fetching tools
+            elif not server.enabled:
+                status = ServerStatus.DISABLED
 
             # Create server response object
             server_response = MCPServerResponse(
                 **server.__dict__,
-                status=ServerStatus.RUNNING,
+                status=status,
                 available_tools=available_tools,
             )
             response.append(server_response)

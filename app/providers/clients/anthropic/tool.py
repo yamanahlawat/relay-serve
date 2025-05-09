@@ -4,7 +4,7 @@ from loguru import logger
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
-from app.model_context_protocol.services.tool_execution import MCPToolExecutionService
+from app.model_context_protocol.services.tool_execution import mcp_tool_service
 
 
 class AnthropicToolHandler:
@@ -14,7 +14,7 @@ class AnthropicToolHandler:
     """
 
     def __init__(self) -> None:
-        self.mcp_service = MCPToolExecutionService()
+        self.mcp_service = mcp_tool_service
 
     def format_tools(self, tools: Sequence[MCPTool]) -> list[dict]:
         """
