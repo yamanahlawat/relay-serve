@@ -12,6 +12,7 @@ from app.model_context_protocol.schemas.servers import (
     MCPServerUpdate,
     ServerStatus,
 )
+from app.model_context_protocol.schemas.tools import MCPTool
 
 
 class MCPServerService:
@@ -25,14 +26,14 @@ class MCPServerService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def list_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
+    async def list_active_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
         """
-        List all MCP servers with their status and available tools.
+        List only active (running) MCP servers with their status and available tools.
         Args:
             offset: Number of items to skip
             limit: Maximum number of items to return
         Returns:
-            List of server responses with status and tools
+            List of active server responses with status and tools
         """
         # Get all servers from DB
         servers = await crud_mcp_server.filter(
@@ -46,32 +47,34 @@ class MCPServerService:
 
         response = []
         for server in servers:
-            status = ServerStatus.RUNNING if server.name in running_servers else ServerStatus.STOPPED
+            # Skip servers that are not running
+            if server.name not in running_servers:
+                continue
 
-            # Get available tools if server is running
+            # Get available tools for running server
             available_tools = []
-            if server.name in running_servers:
-                session = running_servers[server.name]
-                try:
-                    tools_response = await session.list_tools()
-                    available_tools = [
-                        {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "input_schema": tool.inputSchema,
-                        }
-                        for tool in tools_response.tools
-                    ]
-                except Exception:
-                    pass  # Ignore errors when fetching tools
+            session = running_servers[server.name]
+            try:
+                tools_response = await session.list_tools()
+                available_tools = [
+                    MCPTool(
+                        name=tool.name,
+                        description=tool.description,
+                        server_name=server.name,
+                        input_schema=tool.inputSchema,
+                    )
+                    for tool in tools_response.tools
+                ]
+            except Exception:
+                pass  # Ignore errors when fetching tools
 
-            response.append(
-                MCPServerResponse(
-                    **server.__dict__,
-                    status=status,
-                    available_tools=available_tools,
-                )
+            # Create server response object
+            server_response = MCPServerResponse(
+                **server.__dict__,
+                status=ServerStatus.RUNNING,
+                available_tools=available_tools,
             )
+            response.append(server_response)
 
         return response
 

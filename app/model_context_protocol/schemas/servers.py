@@ -1,10 +1,9 @@
 import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.model_context_protocol.constants import ServerStatus
-from app.model_context_protocol.schemas.tools import BaseTool
+from app.model_context_protocol.schemas.tools import MCPTool
 
 
 class MCPServerBase(BaseModel):
@@ -43,6 +42,8 @@ class MCPServerCreate(MCPServerBase):
 
     name: str = Field(description="Unique name for the server")
 
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
+
 
 class MCPServerUpdate(MCPServerBase):
     """
@@ -72,7 +73,7 @@ class MCPServerResponse(MCPServerInDB):
     """
 
     status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
-    available_tools: list[dict[str, Any]] = Field(default_factory=list, description="Available tools from this server")
+    available_tools: list[MCPTool] = Field(default_factory=list, description="Available tools from this server")
 
 
 class MCPServerToggleResponse(BaseModel):
@@ -83,12 +84,3 @@ class MCPServerToggleResponse(BaseModel):
     name: str
     enabled: bool
     status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
-
-
-class MCPServerTools(BaseModel):
-    """
-    Schema for grouping tools by server
-    """
-
-    name: str
-    tools: list[BaseTool]

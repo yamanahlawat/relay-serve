@@ -10,32 +10,32 @@ from app.model_context_protocol.services.server import MCPServerService
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 
 
-@router.get("/", response_model=list[MCPServerResponse])
-async def list_mcp_servers(
+@router.get("/active/", response_model=list[MCPServerResponse])
+async def list_active_mcp_servers(
     offset: int = 0,
     limit: int = 10,
     service: MCPServerService = Depends(get_mcp_server_service),
 ) -> list[MCPServerResponse]:
     """
-    ## List MCP Servers
-    List all MCP servers with their configurations and available tools.
+    ## List Active MCP Servers
+    List all active MCP servers with their configurations and available tools.
 
     MCP servers are configured via code in the DEFAULT_MCP_SERVERS dictionary
-    in the initialize.py file. This endpoint provides a view of the current state.
+    in the initialize.py file. This endpoint provides a view of the current active servers.
 
     ### Parameters
     - **offset**: Number of items to skip (default: 0)
-    - **limit**: Maximum number of items to return (default: 20)
+    - **limit**: Maximum number of items to return (default: 10)
 
     ### Returns
-    List of MCP server configurations with status and available tools
+    List of active MCP server configurations with status and available tools
     """
-    return await service.list_servers(offset=offset, limit=limit)
+    return await service.list_active_servers(offset=offset, limit=limit)
 
 
 @router.patch("/{server_id}/toggle/", response_model=MCPServerToggleResponse)
 async def toggle_mcp_server(
-    server_id: UUID = Path(..., title="The ID of the MCP server"),
+    server_id: UUID = Path(title="The ID of the MCP server"),
     service: MCPServerService = Depends(get_mcp_server_service),
 ) -> MCPServerToggleResponse:
     """
