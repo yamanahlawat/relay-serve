@@ -4,7 +4,7 @@ from loguru import logger
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
-from app.model_context_protocol.services.tool import MCPToolService
+from app.model_context_protocol.services.tool_execution import MCPToolExecutionService
 
 
 class OllamaToolHandler:
@@ -13,7 +13,7 @@ class OllamaToolHandler:
     """
 
     def __init__(self) -> None:
-        self.mcp_service = MCPToolService()
+        self.mcp_service = MCPToolExecutionService()
 
     def format_tools(self, tools: Sequence[MCPTool]) -> list[dict]:
         """

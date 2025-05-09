@@ -8,7 +8,5 @@ class ServerStatus(str, Enum):
 
     RUNNING = "running"
     STOPPED = "stopped"
-    STARTING = "starting"
-    STOPPING = "stopping"
     ERROR = "error"
     UNKNOWN = "unknown"

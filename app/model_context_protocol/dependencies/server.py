@@ -2,15 +2,15 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db_session
-from app.model_context_protocol.services.server import MCPServerService
+from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
-async def get_mcp_server_service(db: AsyncSession = Depends(get_db_session)) -> MCPServerService:
+async def get_mcp_server_service(db: AsyncSession = Depends(get_db_session)) -> MCPServerDomainService:
     """
-    Dependency to get the MCPServerService instance.
+    Dependency to get the MCPServerDomainService instance.
     Args:
         db (AsyncSession, optional): Database session. Defaults to Depends(get_db_session).
     Returns:
-        MCPServerService: Instance of the MCPServerService.
+        MCPServerDomainService: Instance of the MCPServerDomainService.
     """
-    return MCPServerService(db=db)
+    return MCPServerDomainService(db=db)

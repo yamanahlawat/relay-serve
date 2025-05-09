@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from app.model_context_protocol.dependencies.server import get_mcp_server_service
 from app.model_context_protocol.exceptions import MCPServerError
 from app.model_context_protocol.schemas.servers import MCPServerResponse, MCPServerToggleResponse
-from app.model_context_protocol.services.server import MCPServerService
+from app.model_context_protocol.services.domain import MCPServerDomainService
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 async def list_active_mcp_servers(
     offset: int = 0,
     limit: int = 10,
-    service: MCPServerService = Depends(get_mcp_server_service),
+    service: MCPServerDomainService = Depends(get_mcp_server_service),
 ) -> list[MCPServerResponse]:
     """
     ## List Active MCP Servers
@@ -36,7 +36,7 @@ async def list_active_mcp_servers(
 @router.patch("/{server_id}/toggle/", response_model=MCPServerToggleResponse)
 async def toggle_mcp_server(
     server_id: UUID = Path(title="The ID of the MCP server"),
-    service: MCPServerService = Depends(get_mcp_server_service),
+    service: MCPServerDomainService = Depends(get_mcp_server_service),
 ) -> MCPServerToggleResponse:
     """
     ## Toggle MCP Server
