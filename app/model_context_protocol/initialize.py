@@ -36,11 +36,11 @@ The configuration supports various execution methods:
    "env": {"API_KEY": "your-api-key"}
    ```
 
-Example configurations are provided in the MCP_SERVERS dictionary.
+The MCP_SERVERS dictionary contains default configurations that will be used to seed
+the database if no server configurations exist.
 """
 
 from app.core.config import settings
-from app.model_context_protocol.schemas.servers import MCPConfig, MCPServerConfig
 from app.model_context_protocol.services.registry import MCPServerRegistry
 
 MCP_SERVERS = {
@@ -59,6 +59,11 @@ MCP_SERVERS = {
         ],
         "enabled": True,
     },
+    "puppeteer": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "--init", "-e", "DOCKER_CONTAINER=true", "mcp/puppeteer"],
+        "enabled": True,
+    },
     # Direct subprocess execution with Python
     "tavily-search": {
         "command": "python",
@@ -67,14 +72,11 @@ MCP_SERVERS = {
             "mcp_server_tavily",
         ],
         "env": {
-            "TAVILY_API_KEY": settings.TAVILY_SEARCH_API_KEY.get_secret_value(),
+            "TAVILY_API_KEY": settings.TAVILY_SEARCH_API_KEY,
         },
-        "enabled": False,
+        "enabled": True,
     },
 }
 
-# Create the MCP configuration
-mcp_config = MCPConfig(servers={key: MCPServerConfig(**value) for key, value in MCP_SERVERS.items()})
-
 # Instantiate the MCP Server Registry
-mcp_registry = MCPServerRegistry(config=mcp_config)
+mcp_registry = MCPServerRegistry()

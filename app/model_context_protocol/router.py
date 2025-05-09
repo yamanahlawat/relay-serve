@@ -1,27 +1,60 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
 
-from app.model_context_protocol.schemas.servers import MCPServerTools
-from app.model_context_protocol.schemas.tools import BaseTool
-from app.model_context_protocol.services.tool import MCPToolService
+from fastapi import APIRouter, Depends, HTTPException, Path, status
+
+from app.model_context_protocol.dependencies.server import get_mcp_server_service
+from app.model_context_protocol.exceptions import MCPServerError
+from app.model_context_protocol.schemas.servers import MCPServerResponse, MCPServerToggleResponse
+from app.model_context_protocol.services.server import MCPServerService
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 
 
-@router.get("/", response_model=list[MCPServerTools])
-async def list_mcp_tools(
-    tool_service: MCPToolService = Depends(MCPToolService),
-) -> list[MCPServerTools]:
+@router.get("/active/", response_model=list[MCPServerResponse])
+async def list_active_mcp_servers(
+    offset: int = 0,
+    limit: int = 10,
+    service: MCPServerService = Depends(get_mcp_server_service),
+) -> list[MCPServerResponse]:
     """
-    List all available MCP tools grouped by server.
-    Returns:
-        List of servers and their available tools.
-    """
-    # Get all available tools using existing service
-    tools = await tool_service.get_available_tools(refresh=True)
+    ## List Active MCP Servers
+    List all active MCP servers with their configurations and available tools.
 
-    # Group tools by server
-    servers_dict: dict[str, list[BaseTool]] = {}
-    for tool in tools:
-        servers_dict.setdefault(tool.server_name, []).append(tool)
-    # Format response
-    return [MCPServerTools(name=server_name, tools=server_tools) for server_name, server_tools in servers_dict.items()]
+    MCP servers are configured via code in the DEFAULT_MCP_SERVERS dictionary
+    in the initialize.py file. This endpoint provides a view of the current active servers.
+
+    ### Parameters
+    - **offset**: Number of items to skip (default: 0)
+    - **limit**: Maximum number of items to return (default: 10)
+
+    ### Returns
+    List of active MCP server configurations with status and available tools
+    """
+    return await service.list_active_servers(offset=offset, limit=limit)
+
+
+@router.patch("/{server_id}/toggle/", response_model=MCPServerToggleResponse)
+async def toggle_mcp_server(
+    server_id: UUID = Path(title="The ID of the MCP server"),
+    service: MCPServerService = Depends(get_mcp_server_service),
+) -> MCPServerToggleResponse:
+    """
+    ## Toggle MCP Server
+    Toggle a server's enabled status. This is the only runtime modification supported.
+
+    All other configuration changes should be made in the DEFAULT_MCP_SERVERS dictionary
+    in the initialize.py file.
+
+    ### Parameters
+    - **server_id**: UUID of the MCP server
+
+    ### Returns
+    The toggled server status
+
+    ### Raises
+    - **404**: Server not found
+    """
+    try:
+        return await service.toggle_server(server_id=server_id)
+    except MCPServerError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
