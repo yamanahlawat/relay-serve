@@ -50,7 +50,7 @@ class MCPBootstrapService:
             db: Database session
         """
         # Get all server configurations from the database
-        db_servers = await crud_mcp_server.filter(db, limit=1000)
+        db_servers = await crud_mcp_server.filter(db=db)
         db_servers_by_name = {server.name: server for server in db_servers}
 
         # Track servers that should exist in the database
