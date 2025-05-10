@@ -4,17 +4,20 @@ from loguru import logger
 
 from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.exceptions import MCPToolError
-from app.model_context_protocol.initialize import mcp_registry
+from app.model_context_protocol.initialize import mcp_lifecycle_manager
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
 
 
-class MCPToolService:
+class MCPToolExecutionService:
     """
-    Service for managing MCP tool operations.
+    Service for executing MCP tools and managing tool metadata.
+
+    This service is responsible for discovering available tools from running servers,
+    maintaining a tool registry, and executing tool calls on the appropriate servers.
     """
 
     def __init__(self) -> None:
-        self.registry = mcp_registry
+        self.lifecycle_manager = mcp_lifecycle_manager
         self._tool_cache: dict[str, MCPTool] = {}
 
     async def get_available_tools(self, refresh: bool = False) -> Sequence[MCPTool]:
@@ -29,7 +32,7 @@ class MCPToolService:
             return list(self._tool_cache.values())
 
         tools = []
-        running_servers = await self.registry.get_running_servers()
+        running_servers = await self.lifecycle_manager.get_running_servers()
 
         for server_name, session in running_servers.items():
             response = await session.list_tools()
@@ -66,7 +69,7 @@ class MCPToolService:
 
             logger.info(f"Executing tool: {tool_call.name} with arguments: {tool_call.arguments}")
             # Get server session
-            session = await self.registry.get_server_session(db, tool.server_name)
+            session = await self.lifecycle_manager.get_server_session(db, tool.server_name)
 
             # Execute tool
             result = await session.call_tool(name=tool_call.name, arguments=tool_call.arguments)
@@ -75,12 +78,6 @@ class MCPToolService:
 
             return ToolResult(content=result.content, call_id=tool_call.call_id)
 
-    async def refresh_tools(self) -> None:
-        """
-        Force refresh the tool cache.
-        Args:
-            db: Database session (optional if provided at initialization)
-        """
-        # Clear the tool cache
-        self._tool_cache.clear()
-        await self.get_available_tools(refresh=True)
+
+# Create a singleton instance of the service
+mcp_tool_service = MCPToolExecutionService()

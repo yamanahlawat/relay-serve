@@ -1,4 +1,5 @@
 import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -60,6 +61,7 @@ class MCPServerInDB(MCPServerBase):
     Schema for MCP server stored in database
     """
 
+    id: UUID
     name: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
