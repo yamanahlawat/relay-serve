@@ -1,10 +1,12 @@
+from typing import Any, Dict, List, Optional, Union
+
 from loguru import logger
 from mcp import ClientSession
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.crud.server import crud_mcp_server
-from app.model_context_protocol.exceptions import MCPServerNotFoundError
+from app.model_context_protocol.exceptions import MCPServerError, MCPServerNotFoundError
 from app.model_context_protocol.schemas.servers import MCPServerBase, MCPServerUpdate
 from app.model_context_protocol.services.process import MCPProcessManager
 
@@ -21,6 +23,33 @@ class MCPServerLifecycleManager:
     def __init__(self) -> None:
         self.process_manager = MCPProcessManager()
 
+    def _normalize_args(self, args: Union[List[str], Dict[str, Any]]) -> List[str]:
+        """
+        Normalize server arguments to ensure they're in the expected list format.
+
+        Args:
+            args: Server arguments, either as a list or a dict with an 'args' key
+
+        Returns:
+            List of string arguments
+        """
+        if isinstance(args, list):
+            return args
+        return args.get("args", []) if args else []
+
+    def _create_server_config(self, db_server: Any) -> MCPServerBase:
+        """
+        Create a server configuration object from a database server model.
+
+        Args:
+            db_server: Database server model
+
+        Returns:
+            MCPServerBase configuration object
+        """
+        args_list = self._normalize_args(db_server.args)
+        return MCPServerBase(command=db_server.command, args=args_list, enabled=db_server.enabled, env=db_server.env)
+
     async def start_enabled_servers(self) -> None:
         """
         Start all enabled servers from the database.
@@ -33,20 +62,23 @@ class MCPServerLifecycleManager:
             )
 
             for server in enabled_servers:
-                # Check if server is already running
-                if not await self.process_manager.get_session(server.name):
-                    try:
-                        # Convert to config object needed by manager
-                        # Ensure args is properly converted from dict to list[str]
-                        args_list = server.args if isinstance(server.args, list) else server.args.get("args", [])
-                        server_config = MCPServerBase(
-                            command=server.command, args=args_list, enabled=server.enabled, env=server.env
-                        )
+                await self._start_server_if_needed(server)
 
-                        await self.process_manager.start_server(server_name=server.name, config=server_config)
-                        logger.info(f"Successfully started MCP server: {server.name}")
-                    except Exception as error:
-                        logger.error(f"Failed to start MCP server {server.name}: {error}")
+    async def _start_server_if_needed(self, server: Any) -> None:
+        """
+        Start a server if it's not already running.
+
+        Args:
+            server: Server database model
+        """
+        # Check if server is already running
+        if not await self.process_manager.get_session(server.name):
+            try:
+                server_config = self._create_server_config(server)
+                await self.process_manager.start_server(server_name=server.name, config=server_config)
+                logger.info(f"Successfully started MCP server: {server.name}")
+            except Exception as error:
+                logger.error(f"Failed to start MCP server {server.name}: {error}")
 
     async def get_server_session(self, db: AsyncSession, name: str) -> ClientSession:
         """
@@ -73,17 +105,15 @@ class MCPServerLifecycleManager:
         if session:
             return session
 
-        # Convert to config object needed by manager
-        # Ensure args is properly converted from dict to list[str]
-        args_list = db_server.args if isinstance(db_server.args, list) else db_server.args.get("args", [])
-        server_config = MCPServerBase(
-            command=db_server.command, args=args_list, enabled=db_server.enabled, env=db_server.env
-        )
+        # Create config and start server
+        server_config = self._create_server_config(db_server)
 
-        # Start server if not running
-        return await self.process_manager.start_server(server_name=name, config=server_config)
+        try:
+            return await self.process_manager.start_server(server_name=name, config=server_config)
+        except Exception as error:
+            raise MCPServerError(f"Failed to start server '{name}': {error}")
 
-    async def get_server_config(self, db: AsyncSession, name: str) -> MCPServerBase | None:
+    async def get_server_config(self, db: AsyncSession, name: str) -> Optional[MCPServerBase]:
         """
         Get server configuration by name from the database.
         Args:
@@ -96,13 +126,12 @@ class MCPServerLifecycleManager:
         if not db_server:
             return None
 
-        # Ensure args is properly converted from dict to list[str]
-        args_list = db_server.args if isinstance(db_server.args, list) else db_server.args.get("args", [])
-        return MCPServerBase(command=db_server.command, args=args_list, enabled=db_server.enabled, env=db_server.env)
+        return self._create_server_config(db_server)
 
     async def update_server_config(self, db: AsyncSession, name: str, config: MCPServerBase) -> None:
         """
         Update a server configuration in the database and restart if necessary.
+
         Args:
             db: Database session
             name: Server name to update
@@ -117,12 +146,21 @@ class MCPServerLifecycleManager:
             return
 
         await crud_mcp_server.update(db, id=db_server.id, obj_in=update_data)
+        await self._manage_server_state(name, config)
 
-        # Check if server is running
+    async def _manage_server_state(self, name: str, config: MCPServerBase) -> None:
+        """
+        Manage server runtime state based on configuration.
+        Args:
+            name: Server name
+            config: Server configuration
+        """
         session = await self.process_manager.get_session(name)
+
         if session and not config.enabled:
             # Shutdown server if it's now disabled
             await self.process_manager.shutdown_server(name)
+            logger.info(f"Shut down disabled MCP server: {name}")
         elif not session and config.enabled:
             # Start server if it's now enabled
             try:
@@ -154,7 +192,7 @@ class MCPServerLifecycleManager:
         await crud_mcp_server.delete(db, id=db_server.id)
         return True
 
-    async def get_running_servers(self) -> dict[str, ClientSession]:
+    async def get_running_servers(self) -> Dict[str, ClientSession]:
         """
         Get all currently running servers.
         This uses the in-memory state from the process manager rather than the database,
@@ -164,6 +202,15 @@ class MCPServerLifecycleManager:
 
     async def shutdown(self) -> None:
         """
-        Shutdown all running servers.
+        Shutdown all running servers gracefully.
+
+        This method ensures all servers are properly shut down, even if errors occur.
+        It's designed to be called during application shutdown.
         """
-        await self.process_manager.shutdown()
+        try:
+            await self.process_manager.shutdown()
+            logger.info("MCP server lifecycle manager completed shutdown")
+        except Exception as e:
+            logger.error(f"Error during MCP lifecycle manager shutdown: {e}")
+            # Ensure we don't propagate exceptions during shutdown
+            # as this could prevent the application from shutting down cleanly
