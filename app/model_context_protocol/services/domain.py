@@ -6,8 +6,8 @@ from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.exceptions import MCPServerError
 from app.model_context_protocol.initialize import mcp_lifecycle_manager
 from app.model_context_protocol.schemas.servers import (
+    MCPServerCreate,
     MCPServerResponse,
-    MCPServerToggleResponse,
     MCPServerUpdate,
     ServerStatus,
 )
@@ -82,19 +82,77 @@ class MCPServerDomainService:
 
         return response
 
-    async def toggle_server(self, server_id: UUID) -> MCPServerToggleResponse:
+    async def create_server(self, server_data: MCPServerCreate) -> MCPServerResponse:
         """
-        Toggle a server's enabled status.
+        Create a new MCP server configuration.
+        This method creates a new server configuration in the database
+        and starts the server if it's enabled.
+        Args:
+            server_data: Server configuration data
+        Returns:
+            Created server with status
+        """
+        # Create server in database
+        db_server = await crud_mcp_server.create(db=self.db, obj_in=server_data)
 
-        This is the only runtime modification supported for MCP servers.
-        All other configuration changes should be made in the DEFAULT_MCP_SERVERS
-        dictionary in initialize.py.
+        # Determine server status
+        status = ServerStatus.STOPPED
+        available_tools = []
+
+        # Start server if enabled
+        if db_server.enabled:
+            try:
+                # Create server config
+                config = await self.lifecycle_manager.get_server_config(self.db, db_server.name)
+                if config:
+                    # Start server
+                    session = await self.lifecycle_manager.process_manager.start_server(
+                        server_name=db_server.name, config=config
+                    )
+                    status = ServerStatus.RUNNING
+
+                    # Get available tools
+                    try:
+                        tools_response = await session.list_tools()
+                        available_tools = [
+                            MCPTool(
+                                name=tool.name,
+                                description=tool.description,
+                                server_name=db_server.name,
+                                input_schema=tool.inputSchema,
+                            )
+                            for tool in tools_response.tools
+                        ]
+                    except Exception:
+                        pass  # Ignore errors when fetching tools
+            except Exception:
+                status = ServerStatus.ERROR
+
+        # Create response
+        return MCPServerResponse(
+            **db_server.__dict__,
+            status=status,
+            available_tools=available_tools,
+        )
+
+    async def update_server(
+        self, server_id: UUID, update_data: MCPServerUpdate = None, toggle: bool = False
+    ) -> MCPServerResponse:
+        """
+        Update an existing MCP server configuration.
+
+        This method updates an existing server configuration in the database
+        and manages its runtime state based on the updated configuration.
+        It can also handle toggling a server's enabled status when toggle=True.
 
         Args:
-            server_id: UUID of the server to toggle
+            server_id: UUID of the server to update
+            update_data: Server configuration update data (optional if toggle=True)
+            toggle: Whether to toggle the server's enabled status instead of using update_data
 
         Returns:
-            MCPServerToggleResponse with updated status
+            MCPServerResponse with updated server data and status if toggle=False
+            MCPServerToggleResponse with name, enabled status, and status if toggle=True
 
         Raises:
             MCPServerError: If the server is not found
@@ -104,8 +162,9 @@ class MCPServerDomainService:
         if not existing:
             raise MCPServerError("Server not found")
 
-        # Create update object with toggled enabled status
-        update_data = MCPServerUpdate(enabled=not existing.enabled)
+        # Handle toggle case
+        if toggle:
+            update_data = MCPServerUpdate(enabled=not existing.enabled)
 
         # Update the server in database
         updated = await crud_mcp_server.update(db=self.db, id=server_id, obj_in=update_data)
@@ -113,33 +172,66 @@ class MCPServerDomainService:
         # Get running servers to determine status
         running_servers = await self.lifecycle_manager.get_running_servers()
         status = ServerStatus.UNKNOWN
+        available_tools = []
 
-        # Update server runtime state based on new enabled status
+        # Manage server runtime state based on updated configuration
         if updated.enabled:
             # Server should be running
-            if updated.name not in running_servers:
+            restart_needed = False
+
+            # Check if server is already running
+            if updated.name in running_servers:
+                # For toggle, we don't need to restart if it's already running
+                # For update, restart if config may have changed
+                if not toggle:
+                    # Server is already running, but config may have changed
+                    # Restart the server to apply new configuration
+                    await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
+                    restart_needed = True
+                else:
+                    # For toggle, if it's already running, just update status
+                    status = ServerStatus.RUNNING
+            else:
+                # Server is not running, needs to be started
+                restart_needed = True
+
+            # Start server if needed
+            if restart_needed:
                 try:
-                    # Get server config and start it
                     config = await self.lifecycle_manager.get_server_config(self.db, updated.name)
                     if config:
-                        await self.lifecycle_manager.process_manager.start_server(
+                        session = await self.lifecycle_manager.process_manager.start_server(
                             server_name=updated.name, config=config
                         )
                         status = ServerStatus.RUNNING
+
+                        # Get available tools
+                        try:
+                            tools_response = await session.list_tools()
+                            available_tools = [
+                                MCPTool(
+                                    name=tool.name,
+                                    description=tool.description,
+                                    server_name=updated.name,
+                                    input_schema=tool.inputSchema,
+                                )
+                                for tool in tools_response.tools
+                            ]
+                        except Exception:
+                            pass  # Ignore errors when fetching tools
                     else:
                         status = ServerStatus.ERROR
                 except Exception:
                     status = ServerStatus.ERROR
-            else:
-                status = ServerStatus.RUNNING
         else:
             # Server should be stopped
             if updated.name in running_servers:
                 await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
             status = ServerStatus.STOPPED
 
-        return MCPServerToggleResponse(
-            name=updated.name,
-            enabled=updated.enabled,
+        # Always return MCPServerResponse
+        return MCPServerResponse(
+            **updated.__dict__,
             status=status,
+            available_tools=available_tools,
         )

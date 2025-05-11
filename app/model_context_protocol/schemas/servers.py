@@ -76,13 +76,3 @@ class MCPServerResponse(MCPServerInDB):
 
     status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
     available_tools: list[MCPTool] = Field(default_factory=list, description="Available tools from this server")
-
-
-class MCPServerToggleResponse(BaseModel):
-    """
-    Response schema for toggling a server
-    """
-
-    name: str
-    enabled: bool
-    status: ServerStatus = Field(ServerStatus.UNKNOWN, description="Current operational status of the server")
