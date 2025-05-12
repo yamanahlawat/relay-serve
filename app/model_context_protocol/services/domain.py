@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.exceptions import MCPServerError
-from app.model_context_protocol.initialize import mcp_lifecycle_manager
 from app.model_context_protocol.schemas.servers import (
     MCPServerCreate,
     MCPServerResponse,
@@ -12,6 +11,7 @@ from app.model_context_protocol.schemas.servers import (
     ServerStatus,
 )
 from app.model_context_protocol.schemas.tools import MCPTool
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
 class MCPServerDomainService:
@@ -135,24 +135,19 @@ class MCPServerDomainService:
             available_tools=available_tools,
         )
 
-    async def update_server(
-        self, server_id: UUID, update_data: MCPServerUpdate = None, toggle: bool = False
-    ) -> MCPServerResponse:
+    async def update_server(self, server_id: UUID, update_data: MCPServerUpdate) -> MCPServerResponse:
         """
         Update an existing MCP server configuration.
 
         This method updates an existing server configuration in the database
         and manages its runtime state based on the updated configuration.
-        It can also handle toggling a server's enabled status when toggle=True.
 
         Args:
             server_id: UUID of the server to update
-            update_data: Server configuration update data (optional if toggle=True)
-            toggle: Whether to toggle the server's enabled status instead of using update_data
+            update_data: Server configuration update data
 
         Returns:
-            MCPServerResponse with updated server data and status if toggle=False
-            MCPServerToggleResponse with name, enabled status, and status if toggle=True
+            MCPServerResponse with updated server data and status
 
         Raises:
             MCPServerError: If the server is not found
@@ -161,10 +156,6 @@ class MCPServerDomainService:
         existing = await crud_mcp_server.get(db=self.db, id=server_id)
         if not existing:
             raise MCPServerError("Server not found")
-
-        # Handle toggle case
-        if toggle:
-            update_data = MCPServerUpdate(enabled=not existing.enabled)
 
         # Update the server in database
         updated = await crud_mcp_server.update(db=self.db, id=server_id, obj_in=update_data)
@@ -181,16 +172,10 @@ class MCPServerDomainService:
 
             # Check if server is already running
             if updated.name in running_servers:
-                # For toggle, we don't need to restart if it's already running
-                # For update, restart if config may have changed
-                if not toggle:
-                    # Server is already running, but config may have changed
-                    # Restart the server to apply new configuration
-                    await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
-                    restart_needed = True
-                else:
-                    # For toggle, if it's already running, just update status
-                    status = ServerStatus.RUNNING
+                # Server is already running, but config may have changed
+                # Restart the server to apply new configuration
+                await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
+                restart_needed = True
             else:
                 # Server is not running, needs to be started
                 restart_needed = True
@@ -235,3 +220,26 @@ class MCPServerDomainService:
             status=status,
             available_tools=available_tools,
         )
+
+    async def delete_server(self, server_id: UUID) -> None:
+        """
+        Delete an existing MCP server configuration.
+        This method deletes an existing server configuration from the database
+        and shuts down the server if it's running.
+        Args:
+            server_id: UUID of the server to delete
+        Raises:
+            MCPServerError: If the server is not found
+        """
+        # Get the server from database
+        existing = await crud_mcp_server.get(db=self.db, id=server_id)
+        if not existing:
+            raise MCPServerError("Server not found")
+
+        # Shutdown server if running
+        running_servers = await self.lifecycle_manager.get_running_servers()
+        if existing.name in running_servers:
+            await self.lifecycle_manager.process_manager.shutdown_server(existing.name)
+
+        # Delete the server from database
+        await crud_mcp_server.delete(db=self.db, id=server_id)
