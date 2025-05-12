@@ -55,6 +55,8 @@ class MCPServerUpdate(MCPServerBase):
     args: list[str] | None = Field(default=None, description="Arguments passed to command")
     enabled: bool | None = Field(default=None, description="Whether server is enabled")
 
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
+
 
 class MCPServerInDB(MCPServerBase):
     """

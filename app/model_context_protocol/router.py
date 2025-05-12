@@ -2,7 +2,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
-from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.dependencies.server import get_mcp_server_service
 from app.model_context_protocol.exceptions import MCPServerError
 from app.model_context_protocol.schemas.servers import (
@@ -83,36 +82,28 @@ async def update_mcp_server(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
 
 
-@router.patch("/{server_id}/toggle/", response_model=MCPServerResponse)
-async def toggle_mcp_server(
+@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mcp_server(
     server_id: UUID = Path(title="The ID of the MCP server"),
     service: MCPServerDomainService = Depends(get_mcp_server_service),
-) -> MCPServerResponse:
+) -> None:
     """
-    ## Toggle MCP Server
-    Toggle a server's enabled status.
+    ## Delete MCP Server
+    Delete an existing MCP server configuration.
 
-    This endpoint toggles the enabled status of a server by using the update_server method with toggle=True.
+    This endpoint allows deleting an existing MCP server configuration directly from the frontend.
+    If the server is running, it will be shut down before deletion.
 
     ### Parameters
-    - **server_id**: UUID of the MCP server
+    - **server_id**: UUID of the MCP server to delete
 
     ### Returns
-    The toggled server status
+    No content on success
 
     ### Raises
     - **404**: Server not found
     """
     try:
-        # Get the server from database to determine current enabled status
-        existing = await crud_mcp_server.get(db=service.db, id=server_id)
-        if not existing:
-            raise MCPServerError("Server not found")
-
-        # Create update with toggled enabled status
-        update_data = MCPServerUpdate(enabled=not existing.enabled)
-
-        # Use update_server with toggle=True to get MCPServerToggleResponse
-        return await service.update_server(server_id=server_id, update_data=update_data, toggle=True)
+        await service.delete_server(server_id)
     except MCPServerError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
