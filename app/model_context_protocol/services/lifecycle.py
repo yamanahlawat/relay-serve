@@ -214,3 +214,7 @@ class MCPServerLifecycleManager:
             logger.error(f"Error during MCP lifecycle manager shutdown: {e}")
             # Ensure we don't propagate exceptions during shutdown
             # as this could prevent the application from shutting down cleanly
+
+
+# Create a singleton instance of the service
+mcp_lifecycle_manager = MCPServerLifecycleManager()

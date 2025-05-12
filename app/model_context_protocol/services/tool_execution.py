@@ -4,8 +4,8 @@ from loguru import logger
 
 from app.database.session import AsyncSessionLocal
 from app.model_context_protocol.exceptions import MCPToolError
-from app.model_context_protocol.initialize import mcp_lifecycle_manager
 from app.model_context_protocol.schemas.tools import MCPTool, ToolCall, ToolResult
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
 class MCPToolExecutionService:

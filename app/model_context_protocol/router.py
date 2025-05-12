@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from app.model_context_protocol.dependencies.server import get_mcp_server_service
 from app.model_context_protocol.exceptions import MCPServerError
-from app.model_context_protocol.schemas.servers import MCPServerResponse, MCPServerToggleResponse
+from app.model_context_protocol.schemas.servers import (
+    MCPServerCreate,
+    MCPServerResponse,
+    MCPServerUpdate,
+)
 from app.model_context_protocol.services.domain import MCPServerDomainService
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
@@ -20,10 +24,6 @@ async def list_mcp_servers(
     ## List All MCP Servers
     List all configured MCP servers with their configurations and statuses.
 
-    MCP servers are configured via code in the MCP_SERVERS dictionary
-    in the initialize.py file. This endpoint provides a view of all configured servers,
-    regardless of their running state.
-
     ### Parameters
     - **offset**: Number of items to skip (default: 0)
     - **limit**: Maximum number of items to return (default: 10)
@@ -34,28 +34,76 @@ async def list_mcp_servers(
     return await service.list_servers(offset=offset, limit=limit)
 
 
-@router.patch("/{server_id}/toggle/", response_model=MCPServerToggleResponse)
-async def toggle_mcp_server(
+@router.post("/", response_model=MCPServerResponse)
+async def create_mcp_server(
+    server: MCPServerCreate,
+    service: MCPServerDomainService = Depends(get_mcp_server_service),
+) -> MCPServerResponse:
+    """
+    ## Create MCP Server
+    Create a new MCP server configuration.
+
+    This endpoint allows creating new MCP server configurations directly from the frontend.
+
+    ### Parameters
+    - **server**: MCP server configuration
+
+    ### Returns
+    The created MCP server configuration with status
+    """
+    return await service.create_server(server)
+
+
+@router.put("/{server_id}", response_model=MCPServerResponse)
+async def update_mcp_server(
+    server: MCPServerUpdate,
     server_id: UUID = Path(title="The ID of the MCP server"),
     service: MCPServerDomainService = Depends(get_mcp_server_service),
-) -> MCPServerToggleResponse:
+) -> MCPServerResponse:
     """
-    ## Toggle MCP Server
-    Toggle a server's enabled status. This is the only runtime modification supported.
+    ## Update MCP Server
+    Update an existing MCP server configuration.
 
-    All other configuration changes should be made in the DEFAULT_MCP_SERVERS dictionary
-    in the initialize.py file.
+    This endpoint allows updating an existing MCP server configuration directly from the frontend.
 
     ### Parameters
     - **server_id**: UUID of the MCP server
+    - **server**: MCP server configuration update
 
     ### Returns
-    The toggled server status
+    The updated MCP server configuration with status
 
     ### Raises
     - **404**: Server not found
     """
     try:
-        return await service.toggle_server(server_id=server_id)
+        return await service.update_server(server_id, server)
+    except MCPServerError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+
+
+@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mcp_server(
+    server_id: UUID = Path(title="The ID of the MCP server"),
+    service: MCPServerDomainService = Depends(get_mcp_server_service),
+) -> None:
+    """
+    ## Delete MCP Server
+    Delete an existing MCP server configuration.
+
+    This endpoint allows deleting an existing MCP server configuration directly from the frontend.
+    If the server is running, it will be shut down before deletion.
+
+    ### Parameters
+    - **server_id**: UUID of the MCP server to delete
+
+    ### Returns
+    No content on success
+
+    ### Raises
+    - **404**: Server not found
+    """
+    try:
+        await service.delete_server(server_id)
     except MCPServerError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
