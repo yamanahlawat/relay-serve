@@ -34,7 +34,7 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies using uv
-RUN uv sync --group dev --group providers --group mcp-servers
+RUN uv sync --group dev --group providers
 
 # =========================================================================
 # Stage 2: Final Stage
@@ -78,10 +78,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        docker-ce-cli \
        nodejs \
-    # Clean up apt cache and remove temporary files
-    && apt-get purge -y --auto-remove apt-transport-https ca-certificates curl gnupg \
+    # Clean up apt cache but keep necessary dependencies for Node.js and Docker
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/nodesource.list
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the installed Python environment (packages) from the builder stage
 COPY --from=builder /usr/local /usr/local
