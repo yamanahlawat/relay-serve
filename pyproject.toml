@@ -11,33 +11,28 @@ dependencies = [
     "pydantic>=2.11.4",
     "pydantic-settings>=2.9.1",
     "sqlalchemy>=2.0.40",
-    "greenlet>=3.2.1",
+    "greenlet>=3.2.2",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.27.0",
-    "redis[hiredis]>=6.0.0",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.28.0",
+    "redis[hiredis]>=6.1.0",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.2.1",
     "pybase64>=1.4.1",
-    "mcp[cli]>=1.7.1",
+    "mcp[cli]>=1.8.1",
     "llm-registry>=0.3.3",
     "ipdb>=0.13.13",
-    "docker>=7.1.0",
 ]
 
 [dependency-groups]
 providers = [
     "anthropic>=0.51.0",
     "ollama>=0.4.8",
-    "openai>=1.77.0",
+    "openai>=1.78.1",
 ]
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.2.0",
-    "ruff>=0.11.8",
+    "ruff>=0.11.9",
     "tomli-w>=1.2.0",
-]
-mcp-servers = [
-    "mcp-server-time>=0.6.2",
-    "mcp-tavily>=0.1.8",
 ]
