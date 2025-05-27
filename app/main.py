@@ -9,6 +9,7 @@ from app.chat.services.sse import get_sse_manager
 from app.core.config import settings
 from app.core.sentry import init_sentry
 from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
+from app.model_context_protocol.services.tool_execution import mcp_tool_service
 
 
 @asynccontextmanager
@@ -16,6 +17,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     """
     Context manager to handle the lifespan of the application.
     """
+    # Initialize the MCP tool service event handlers
+    await mcp_tool_service.initialize()
+
     # Start enabled MCP servers from database
     await mcp_lifecycle_manager.start_enabled_servers()
     yield
