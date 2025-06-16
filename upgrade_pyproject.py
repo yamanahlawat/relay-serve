@@ -1,27 +1,57 @@
 """
-Script to update pyproject.toml dependencies based on uv.lock file.
+Script to automatically update uv.lock and then update pyproject.toml dependencies.
 
 Prerequisites:
     1. Python 3.11+ (for tomllib)
     2. tomli-w package (`pip install tomli-w`)
-    3. Updated uv.lock file (`uv lock --update` or `uv lock -U`)
+    3. uv installed and available in PATH
 
 Usage:
-    1. Update your lockfile: `uv lock -U`
-    2. Run this script: `python upgrade_pyproject.py`
+    Run this script: `python upgrade_pyproject.py`
+
+    The script will:
+    1. Automatically run `uv lock -U` to update the lockfile
+    2. Update pyproject.toml based on the new lock file
 
 Notes:
-    - Creates a backup of pyproject.toml before making changes
     - Preserves dependency extras (e.g., fastapi[standard])
     - Updates both main dependencies and dependency groups
     - Removes duplicate version constraints
 """
 
-import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import tomli_w
+
+
+def run_uv_lock_update() -> bool:
+    """Run uv lock -U command and return success status."""
+    print("Running 'uv lock -U' to update dependencies...")
+    print("-" * 50)
+
+    try:
+        # Run uv lock -U
+        result = subprocess.run(["uv", "lock", "-U"], capture_output=True, text=True, check=True)
+
+        # Print output
+        if result.stdout:
+            print(result.stdout)
+
+        print("-" * 50)
+        print("✓ Successfully updated uv.lock")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Error running 'uv lock -U': {e}")
+        if e.stderr:
+            print(f"Error output: {e.stderr}")
+        return False
+    except FileNotFoundError:
+        print("✗ Error: 'uv' command not found. Please ensure uv is installed and in PATH.")
+        return False
 
 
 def clean_dependency(dep: str) -> tuple[str, str]:
@@ -39,11 +69,6 @@ def clean_dependency(dep: str) -> tuple[str, str]:
 def update_dependencies(pyproject_path: Path, lock_path: Path) -> None:
     """Update pyproject.toml dependencies based on uv.lock."""
     try:
-        # Create backup
-        backup_path = pyproject_path.with_suffix(".toml.backup")
-        shutil.copy2(pyproject_path, backup_path)
-        print(f"Created backup at: {backup_path}")
-
         # Read files
         print("\nReading project files...")
         pyproject = tomllib.loads(pyproject_path.read_text())
@@ -61,14 +86,19 @@ def update_dependencies(pyproject_path: Path, lock_path: Path) -> None:
 
         # Update main dependencies
         print("\nUpdating dependencies...")
+        updated_count = 0
+
         if deps := pyproject.get("project", {}).get("dependencies"):
             print("\nMain dependencies:")
             for i, dep in enumerate(deps):
                 pkg_name, extras = clean_dependency(dep)
                 if pkg_name in versions:
                     old_dep = deps[i]
-                    deps[i] = f"{pkg_name}{extras}>={versions[pkg_name]}"
-                    print(f"  {old_dep} -> {deps[i]}")
+                    new_dep = f"{pkg_name}{extras}>={versions[pkg_name]}"
+                    if old_dep != new_dep:
+                        deps[i] = new_dep
+                        print(f"  {old_dep} -> {new_dep}")
+                        updated_count += 1
 
         # Update dependency groups
         if groups := pyproject.get("dependency-groups"):
@@ -78,32 +108,63 @@ def update_dependencies(pyproject_path: Path, lock_path: Path) -> None:
                     pkg_name, extras = clean_dependency(dep)
                     if pkg_name in versions:
                         old_dep = deps[i]
-                        deps[i] = f"{pkg_name}{extras}>={versions[pkg_name]}"
-                        print(f"  {old_dep} -> {deps[i]}")
+                        new_dep = f"{pkg_name}{extras}>={versions[pkg_name]}"
+                        if old_dep != new_dep:
+                            deps[i] = new_dep
+                            print(f"  {old_dep} -> {new_dep}")
+                            updated_count += 1
 
         # Write updated pyproject.toml
-        print("\nWriting updated pyproject.toml...")
-        pyproject_path.write_bytes(tomli_w.dumps(pyproject).encode())
-        print("Successfully updated pyproject.toml")
+        if updated_count > 0:
+            print(f"\nWriting updated pyproject.toml ({updated_count} dependencies updated)...")
+            pyproject_path.write_bytes(tomli_w.dumps(pyproject).encode())
+            print("✓ Successfully updated pyproject.toml")
+        else:
+            print("\n✓ No updates needed - all dependencies are already up to date")
 
     except Exception as e:
-        print(f"\nError: {e}")
-        exit(1)
+        print(f"\n✗ Error updating dependencies: {e}")
+        sys.exit(1)
 
 
-if __name__ == "__main__":
-    print("Starting dependency update process...\n")
+def main():
+    """Main function to coordinate the update process."""
+    print("🚀 Starting automated dependency update process...\n")
     current_dir = Path.cwd()
     print(f"Working directory: {current_dir}")
 
     pyproject_path = current_dir / "pyproject.toml"
     lock_path = current_dir / "uv.lock"
 
+    # Check if required files exist
     if not pyproject_path.exists():
-        print("Error: pyproject.toml not found")
-        exit(1)
+        print("✗ Error: pyproject.toml not found")
+        sys.exit(1)
     if not lock_path.exists():
-        print("Error: uv.lock not found")
-        exit(1)
+        print("✗ Error: uv.lock not found")
+        print("  Run 'uv lock' first to create the lock file")
+        sys.exit(1)
+
+    # Step 1: Run uv lock -U
+    print("\n" + "=" * 60)
+    print("STEP 1: Updating lock file")
+    print("=" * 60 + "\n")
+
+    if not run_uv_lock_update():
+        print("\n✗ Failed to update lock file. Aborting.")
+        sys.exit(1)
+
+    # Step 2: Update pyproject.toml
+    print("\n" + "=" * 60)
+    print("STEP 2: Updating pyproject.toml")
+    print("=" * 60 + "\n")
 
     update_dependencies(pyproject_path, lock_path)
+
+    print("\n" + "=" * 60)
+    print("✓ All done! Your dependencies have been updated.")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
