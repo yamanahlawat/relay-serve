@@ -8,27 +8,27 @@ dependencies = [
     "alembic>=1.16.1",
     "asyncpg>=0.30.0",
     "fastapi[standard]>=0.115.12",
-    "pydantic>=2.11.5",
+    "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
     "sqlalchemy>=2.0.41",
     "greenlet>=3.2.3",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.29.1",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.30.0",
     "redis[hiredis]>=6.2.0",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.2.1",
     "pybase64>=1.4.1",
-    "mcp[cli]>=1.9.3",
+    "mcp[cli]>=1.9.4",
     "llm-registry>=0.3.8",
     "ipdb>=0.13.13",
 ]
 
 [dependency-groups]
 providers = [
-    "anthropic>=0.52.2",
+    "anthropic>=0.54.0",
     "ollama>=0.5.1",
-    "openai>=1.84.0",
+    "openai>=1.86.0",
 ]
 dev = [
     "ipdb>=0.13.13",
