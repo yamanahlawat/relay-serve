@@ -64,7 +64,7 @@ class LLMSettings(BaseSettings):
 
 class Settings(BaseSettings):
     """
-    Handles config and settings for notifications
+    Handles config and settings for relay serve.
     Fetches the config from environment variables and .env file
     """
 
