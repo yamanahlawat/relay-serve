@@ -11,7 +11,7 @@ from sqlalchemy.sql import func, select
 from app.chat.constants import SessionStatus
 from app.chat.models.message import ChatMessage
 from app.database.base_class import TimeStampedBase
-from app.providers.models import LLMModel, LLMProvider
+from app.llms.models import LLMModel, LLMProvider
 
 
 class ChatSession(TimeStampedBase):
@@ -80,6 +80,7 @@ class ChatSession(TimeStampedBase):
         return self.total_input_cost + self.total_output_cost
 
     @total_cost.expression
+    @classmethod
     def total_cost(cls):
         """
         SQL expression for total cost
