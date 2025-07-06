@@ -55,11 +55,7 @@ class MemoryService:
                 "config": {
                     "url": settings.MEM0.GRAPH_STORE_URL,
                     "username": settings.MEM0.GRAPH_STORE_USERNAME,
-                    "password": (
-                        settings.MEM0.GRAPH_STORE_PASSWORD.get_secret_value()
-                        if settings.MEM0.GRAPH_STORE_PASSWORD
-                        else None
-                    ),
+                    "password": settings.MEM0.GRAPH_STORE_PASSWORD.get_secret_value(),
                 },
             }
 

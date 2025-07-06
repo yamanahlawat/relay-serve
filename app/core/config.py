@@ -73,16 +73,16 @@ class Mem0Settings(BaseSettings):
 
     # Vector store configuration
     VECTOR_STORE_PROVIDER: str = "qdrant"
-    VECTOR_STORE_HOST: str = "localhost"
-    VECTOR_STORE_PORT: int = 6333
+    VECTOR_STORE_HOST: str
+    VECTOR_STORE_PORT: int
     VECTOR_STORE_COLLECTION_NAME: str = "relay_memories"
 
     # Graph store configuration
     ENABLE_GRAPH_MEMORY: bool = True
     GRAPH_STORE_PROVIDER: str = "neo4j"
     GRAPH_STORE_URL: str = "bolt://localhost:7687"
-    GRAPH_STORE_USERNAME: str = "neo4j"
-    GRAPH_STORE_PASSWORD: SecretStr | None = None
+    GRAPH_STORE_USERNAME: str
+    GRAPH_STORE_PASSWORD: SecretStr
 
     # LLM configuration for memory processing
     MEMORY_LLM_PROVIDER: str = "openai"
@@ -139,7 +139,7 @@ class Settings(BaseSettings):
 
     # AI Configuration
     LLM: LLMSettings = LLMSettings()
-    MEM0: Mem0Settings = Mem0Settings()
+    MEM0: Mem0Settings
 
     model_config = SettingsConfigDict(
         env_file=".env",

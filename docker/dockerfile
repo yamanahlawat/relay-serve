@@ -7,34 +7,34 @@ FROM python:${PYTHON_VERSION} AS builder
 
 # Set environment variables for the build stage
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/usr/local \
-    PYTHONPATH=/src
+  PYTHONUNBUFFERED=1 \
+  UV_COMPILE_BYTECODE=1 \
+  UV_LINK_MODE=copy \
+  UV_PROJECT_ENVIRONMENT=/usr/local \
+  PYTHONPATH=/src
 
 # Set the working directory
 WORKDIR /src
 
 # Install build-time system dependencies and uv in a single layer
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       git \
-       wget \
-       openssh-client \
-       gcc \
-       python3-dev \
-    # Install uv using pip
-    && pip install uv \
-    # Clean up apt cache
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends \
+  git \
+  wget \
+  openssh-client \
+  gcc \
+  python3-dev \
+  # Install uv using pip
+  && pip install uv \
+  # Clean up apt cache
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy only the dependency definition files first to leverage Docker cache
 COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies using uv
-RUN uv sync --group dev --group providers
+RUN uv sync --group dev
 
 # =========================================================================
 # Stage 2: Final Stage
@@ -44,43 +44,43 @@ FROM python:${PYTHON_VERSION}
 
 # Set environment variables for the final runtime image
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_PROJECT_ENVIRONMENT=/usr/local \
-    PYTHONPATH=/src
+  PYTHONUNBUFFERED=1 \
+  UV_PROJECT_ENVIRONMENT=/usr/local \
+  PYTHONPATH=/src
 
 # Set the working directory
 WORKDIR /src
 
 # Install runtime system dependencies, Docker CLI, and Node.js in a single layer
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       # Runtime dependencies from original Dockerfile
-       libgl1-mesa-dev \
-       libglib2.0-0 \
-       # Dependencies required for Docker CLI and Node.js installation
-       apt-transport-https \
-       ca-certificates \
-       curl \
-       gnupg \
-    # Install Docker CLI
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo \
-       "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-       tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    # Install Node.js LTS using NodeSource
-    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    # Update apt list again after adding new repositories
-    && apt-get update \
-    # Install Docker CLI and Node.js
-    && apt-get install -y --no-install-recommends \
-       docker-ce-cli \
-       nodejs \
-    # Clean up apt cache but keep necessary dependencies for Node.js and Docker
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends \
+  # Runtime dependencies from original Dockerfile
+  libgl1-mesa-dev \
+  libglib2.0-0 \
+  # Dependencies required for Docker CLI and Node.js installation
+  apt-transport-https \
+  ca-certificates \
+  curl \
+  gnupg \
+  # Install Docker CLI
+  && install -m 0755 -d /etc/apt/keyrings \
+  && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+  && chmod a+r /etc/apt/keyrings/docker.gpg \
+  && echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null \
+  # Install Node.js LTS using NodeSource
+  && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+  # Update apt list again after adding new repositories
+  && apt-get update \
+  # Install Docker CLI and Node.js
+  && apt-get install -y --no-install-recommends \
+  docker-ce-cli \
+  nodejs \
+  # Clean up apt cache but keep necessary dependencies for Node.js and Docker
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy the installed Python environment (packages) from the builder stage
 COPY --from=builder /usr/local /usr/local
