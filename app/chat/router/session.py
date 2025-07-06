@@ -8,7 +8,6 @@ from app.chat.exceptions.session import SessionNotFoundException
 from app.chat.models import ChatSession
 from app.chat.schemas import SessionCreate, SessionRead, SessionUpdate
 from app.chat.services import ChatSessionService
-from app.providers.exceptions import InvalidModelProviderException, ModelNotFoundException, ProviderNotFoundException
 
 router = APIRouter(prefix="/sessions", tags=["Chat Sessions"])
 
@@ -33,21 +32,9 @@ async def create_chat_session(
     The created chat session
 
     ### Raises
-    - **404**: Provider or model not found
-    - **400**: Invalid provider/model combination
+    - **404**: Session not found
     """
-    try:
-        return await service.create_session(session_in=session_in)
-    except InvalidModelProviderException as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error.message,
-        )
-    except (ProviderNotFoundException, ModelNotFoundException) as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=error.message,
-        )
+    return await service.create_session(session_in=session_in)
 
 
 @router.get("/", response_model=list[SessionRead])

@@ -1,7 +1,7 @@
-from enum import Enum
+from app.core.constants import BaseEnum
 
 
-class ServerStatus(str, Enum):
+class ServerStatus(BaseEnum):
     """
     Enum representing possible server operational statuses
     """
@@ -13,7 +13,7 @@ class ServerStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class MCPEventType(str, Enum):
+class MCPEventType(BaseEnum):
     """
     Enum representing event types for the MCP event bus system.
     These events are used for communication between decoupled components.

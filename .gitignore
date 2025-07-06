@@ -131,3 +131,5 @@ dmypy.json
 **/.DS_Store
 
 server
+
+neo4j_auth.txt

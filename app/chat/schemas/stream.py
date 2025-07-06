@@ -1,13 +1,13 @@
-from enum import Enum
 from typing import Any
 
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 from pydantic import BaseModel
 
 from app.chat.schemas.message import MessageRead
+from app.core.constants import BaseEnum
 
 
-class StreamEvent(str, Enum):
+class StreamEvent(BaseEnum):
     """
     Stream event types
     """
@@ -27,7 +27,7 @@ class StreamResponse(BaseModel):
     error: str | None = None
 
 
-class StreamBlockType(str, Enum):
+class StreamBlockType(BaseEnum):
     """
     Types of blocks in the message stream
     """
