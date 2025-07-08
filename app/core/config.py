@@ -68,37 +68,6 @@ class LLMSettings(BaseSettings):
     ENABLE_LOGFIRE: bool = False
 
 
-class Mem0Settings(BaseSettings):
-    """Settings for mem0 memory management."""
-
-    # Vector store configuration
-    VECTOR_STORE_PROVIDER: str = "qdrant"
-    VECTOR_STORE_HOST: str = "localhost"
-    VECTOR_STORE_PORT: int = 6333
-    VECTOR_STORE_COLLECTION_NAME: str = "relay_memories"
-
-    # Graph store configuration
-    ENABLE_GRAPH_MEMORY: bool = True
-    GRAPH_STORE_PROVIDER: str = "neo4j"
-    GRAPH_STORE_URL: str = "bolt://localhost:7687"
-    GRAPH_STORE_USERNAME: str = "neo4j"
-    GRAPH_STORE_PASSWORD: SecretStr | None = None
-
-    # LLM configuration for memory processing
-    MEMORY_LLM_PROVIDER: str = "openai"
-    MEMORY_LLM_MODEL: str = "gpt-4o-mini"
-    MEMORY_LLM_TEMPERATURE: float = 0.0
-
-    # Embedder configuration
-    EMBEDDER_PROVIDER: str = "openai"
-    EMBEDDER_MODEL: str = "text-embedding-3-small"
-    EMBEDDER_DIMENSIONS: int = 1536
-
-    # Memory management settings
-    MEMORY_DECAY_RATE: float = 0.99
-    MAX_MEMORY_AGE_DAYS: int = 90
-
-
 class Settings(BaseSettings):
     """
     Handles config and settings for relay serve.
@@ -139,7 +108,6 @@ class Settings(BaseSettings):
 
     # AI Configuration
     LLM: LLMSettings = LLMSettings()
-    MEM0: Mem0Settings = Mem0Settings()
 
     model_config = SettingsConfigDict(
         env_file=".env",
