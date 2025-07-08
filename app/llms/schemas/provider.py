@@ -22,6 +22,8 @@ class ProviderCreate(ProviderBase):
 
     api_key: SecretStr | None = None
 
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
+
 
 class ProviderRead(ProviderBase):
     """Schema for reading a provider."""
@@ -42,3 +44,5 @@ class ProviderUpdate(BaseModel):
     is_active: bool | None = None
     api_key: SecretStr | None = None
     base_url: str | None = None
+
+    model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})

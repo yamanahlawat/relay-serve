@@ -1,38 +1,35 @@
-"""Chat service using pydantic_ai and mem0."""
-
-import json
 from typing import Any, AsyncIterator
+from uuid import UUID
 
 from loguru import logger
+from pydantic import ValidationError
 from pydantic_ai import Agent
-from pydantic_ai.messages import (
-    FinalResultEvent,
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPartDelta,
-    ToolCallPart,
-    ToolCallPartDelta,
-)
 from pydantic_ai.settings import ModelSettings
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.memory import memory_service
 from app.ai.providers.factory import ProviderFactory
+from app.chat.constants import MessageRole, MessageStatus
+from app.chat.schemas.message import MessageCreate, MessageUpdate
+from app.chat.services.message import ChatMessageService
+from app.chat.services.session import ChatSessionService
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
 
 
 class ChatService:
-    """Service for handling chat completions with pydantic_ai and mem0."""
+    """Service for handling chat completions with pydantic_ai"""
 
-    def __init__(self) -> None:
-        """Initialize the chat service."""
+    def __init__(self, db: AsyncSession) -> None:
+        """Initialize the chat service with database session."""
+        self.db = db
         self._agents: dict[str, Agent] = {}
+        self.message_service = ChatMessageService(db=db)
+        self.session_service = ChatSessionService(db=db)
 
     def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
         """Generate a unique key for caching agents."""
-        return f"{provider.name}:{model.name}"
+        return f"{provider.provider_type.value}:{model.name}"
 
     def _get_or_create_agent(
         self,
@@ -56,125 +53,92 @@ class ChatService:
 
     async def _prepare_conversation_context(
         self,
-        user_id: str,
-        session_id: str,
+        session_id: UUID,
         message: str,
     ) -> str:
         """
-        Prepare conversation context with memory.
+        Prepare conversation context with recent messages from the session.
         """
         context_parts = []
 
-        # Always search for relevant memories
-        relevant_memories = await memory_service.search_memories(
-            query=message,
-            user_id=user_id,
-            session_id=session_id,
-            limit=3,
-        )
+        # Get recent conversation messages for context
+        try:
+            recent_messages = await self.message_service.list_messages(
+                session_id=session_id,
+                offset=0,
+                limit=10,  # Get last 10 messages for context
+            )
 
-        # Add relevant memories to context if found
-        if relevant_memories:
-            memory_context = "\n".join([f"Memory: {memory.get('memory', '')}" for memory in relevant_memories])
-            context_parts.append(f"Relevant memories:\n{memory_context}")
+            # Add recent messages to context if found
+            if recent_messages:
+                message_context = []
+                for msg in reversed(recent_messages):  # Reverse to get chronological order
+                    role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
+                    content = msg.content or ""
+                    message_context.append(f"{role.capitalize()}: {content}")
+
+                if message_context:
+                    context_parts.append("Recent conversation:\n" + "\n".join(message_context))
+        except SQLAlchemyError as e:
+            logger.warning(f"Database error retrieving conversation context: {e}")
+        except (AttributeError, TypeError) as e:
+            logger.warning(f"Data formatting error in conversation context: {e}")
 
         # Add the current user message
         context_parts.append(f"User: {message}")
 
         return "\n\n".join(context_parts)
 
-    async def generate_response(
-        self,
-        provider: LLMProvider,
-        model: LLMModel,
-        user_id: str,
-        session_id: str,
-        message: str,
-        system_prompt: str | None = None,
-        tools: list[Any] | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-    ) -> str:
-        """Generate a response using pydantic_ai."""
-        try:
-            # Get or create agent
-            agent = self._get_or_create_agent(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                tools=tools,
-            )
-
-            # Prepare conversation context (memory always included)
-            conversation_context = await self._prepare_conversation_context(
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-            )
-
-            # Add user message to memory
-            await memory_service.add_memory(
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                role="user",
-            )
-
-            # Prepare model settings, using model defaults if not provided
-            model_settings_dict = {}
-            if temperature is not None:
-                model_settings_dict["temperature"] = temperature
-            elif model.default_temperature is not None:
-                model_settings_dict["temperature"] = model.default_temperature
-
-            if max_tokens is not None:
-                model_settings_dict["max_tokens"] = max_tokens
-            elif model.default_max_tokens is not None:
-                model_settings_dict["max_tokens"] = model.default_max_tokens
-
-            # Generate response using pydantic_ai
-            if model_settings_dict:
-                model_settings = ModelSettings(**model_settings_dict)
-                response = await agent.run(conversation_context, model_settings=model_settings)
-            else:
-                response = await agent.run(conversation_context)
-
-            # Add AI response to memory
-            await memory_service.add_memory(
-                user_id=user_id,
-                session_id=session_id,
-                message=str(response.output),
-                role="assistant",
-            )
-
-            return str(response.output)
-
-        except Exception as e:
-            logger.error(f"Error generating response: {e}", exc_info=True)
-            raise
-
     async def stream_response(
         self,
         provider: LLMProvider,
         model: LLMModel,
-        user_id: str,
-        session_id: str,
-        message: str,
+        session_id: UUID,
+        message_id: UUID,
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """
-        Stream a response using pydantic_ai with full event handling and markdown formatting.
+        Stream a response for an existing message using pydantic_ai.
 
-        This method handles:
-        - Tool calls with formatted output
-        - Text streaming with real-time updates
-        - Error handling with markdown formatting
-        - Memory integration (always included)
+        Args:
+            provider: LLM provider to use
+            model: LLM model to use
+            session_id: UUID of the chat session
+            message_id: UUID of existing message to complete
+            system_prompt: Optional system prompt override
+            tools: Optional tools for the agent
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+
+        Yields:
+            Streamed response chunks
+
+        Raises:
+            ValueError: If message not found or invalid
+            RuntimeError: If database or AI operation fails
         """
         try:
+            # Get the existing message
+            existing_message = await self.message_service.get_message(
+                session_id=session_id,
+                message_id=message_id,
+            )
+            if not existing_message or not existing_message.content:
+                raise ValueError(f"Message {message_id} not found or has no content")
+
+            message_content = existing_message.content
+
+            # Update message status to processing
+
+            await self.message_service.update_message(
+                session_id=session_id,
+                message_id=message_id,
+                message_in=MessageUpdate(status=MessageStatus.PROCESSING),
+            )
+
             # Get or create agent
             agent = self._get_or_create_agent(
                 provider=provider,
@@ -183,22 +147,13 @@ class ChatService:
                 tools=tools,
             )
 
-            # Prepare conversation context (memory always included)
+            # Prepare conversation context
             conversation_context = await self._prepare_conversation_context(
-                user_id=user_id,
                 session_id=session_id,
-                message=message,
+                message=message_content,
             )
 
-            # Add user message to memory
-            await memory_service.add_memory(
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                role="user",
-            )
-
-            # Prepare model settings, using model defaults if not provided
+            # Prepare model settings
             model_settings_dict = {}
             if temperature is not None:
                 model_settings_dict["temperature"] = temperature
@@ -210,270 +165,100 @@ class ChatService:
             elif model.default_max_tokens is not None:
                 model_settings_dict["max_tokens"] = model.default_max_tokens
 
-            # Track the full response for memory storage
+            # Track the full response for database storage
             full_response = ""
             model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
-            content_streamed = False
 
-            # Use pydantic_ai's iter method for full event streaming
-            async with agent.iter(conversation_context, model_settings=model_settings) as run:
-                async for node in run:
-                    if Agent.is_user_prompt_node(node):
-                        # User prompt - already handled, skip
-                        continue
+            # Use pydantic_ai's native streaming
+            async with agent.run_stream(conversation_context, model_settings=model_settings) as result:
+                async for chunk in result.stream():
+                    yield chunk
+                    full_response += chunk
 
-                    elif Agent.is_model_request_node(node):
-                        # Model is processing - stream the partial responses
-                        async with node.stream(run.ctx) as request_stream:
-                            async for event in request_stream:
-                                if isinstance(event, PartStartEvent):
-                                    # Start of a new part - check if it's a tool call
-                                    if isinstance(event.part, ToolCallPart):
-                                        # This is a tool call
-                                        formatted = self._format_tool_call_start(
-                                            event.part.tool_name,
-                                            event.part.args if isinstance(event.part.args, dict) else {},
-                                        )
-                                        yield formatted
-                                        full_response += formatted
-                                    elif hasattr(event.part, "content"):
-                                        # This is a text part with initial content
-                                        text_chunk = event.part.content
-                                        yield text_chunk
-                                        full_response += text_chunk
-                                        content_streamed = True
-
-                                elif isinstance(event, PartDeltaEvent):
-                                    if isinstance(event.delta, TextPartDelta):
-                                        # Stream text content as it arrives
-                                        text_chunk = event.delta.content_delta
-                                        yield text_chunk
-                                        full_response += text_chunk
-                                        content_streamed = True
-                                    elif isinstance(event.delta, ToolCallPartDelta):
-                                        # Tool call arguments are being built - could show progress
-                                        # For now, we'll handle this in the tool call result
-                                        pass
-
-                                elif isinstance(event, FinalResultEvent):
-                                    # Model has finished generating this part
-                                    if event.tool_name:
-                                        # This was a tool call completion
-                                        pass  # We'll handle results in CallToolsNode
-                                    # For text, this just means the text part is complete
-
-                    elif Agent.is_call_tools_node(node):
-                        # Handle tool execution and results
-                        async with node.stream(run.ctx) as tool_stream:
-                            async for event in tool_stream:
-                                if isinstance(event, FunctionToolCallEvent):
-                                    # Tool is being called - already showed this in model request
-                                    pass
-
-                                elif isinstance(event, FunctionToolResultEvent):
-                                    # Tool call completed with result
-                                    formatted = self._format_tool_call_result(
-                                        getattr(event, "tool_name", "unknown"), str(event.result.content)
-                                    )
-                                    yield formatted
-                                    full_response += formatted
-
-                    elif Agent.is_end_node(node):
-                        # Final result - the conversation is complete
-                        if content_streamed:
-                            # Content was already streamed, just log the final result
-                            if run.result and hasattr(run.result, "data"):
-                                logger.debug(f"Final result: {run.result.data}")
-                        else:
-                            # No content was streamed, yield the final result
-                            if run.result and hasattr(run.result, "data"):
-                                final_output = str(run.result.data)
-                                yield final_output
-                                full_response += final_output
-
-            # Add full AI response to memory after streaming is complete
+            # Add AI response to database after streaming
             if full_response.strip():
-                await memory_service.add_memory(
-                    user_id=user_id,
+                assistant_message = MessageCreate(
+                    content=full_response.strip(),
+                    role=MessageRole.ASSISTANT,
+                    status=MessageStatus.COMPLETED,
+                    parent_id=message_id,
+                )
+                await self.message_service.create_message(
+                    message_in=assistant_message,
                     session_id=session_id,
-                    message=full_response.strip(),
-                    role="assistant",
                 )
 
-        except Exception as e:
-            logger.error(f"Error streaming response: {e}", exc_info=True)
-            # Yield an error message to the client in markdown format
-            error_msg = f"\n\n❌ **Error:** Unable to generate response. Please try again.\n\n*Details: {str(e)}*"
+            # Update original message status to completed
+            await self.message_service.update_message(
+                session_id=session_id,
+                message_id=message_id,
+                message_in=MessageUpdate(status=MessageStatus.COMPLETED),
+            )
+
+        except ValidationError as e:
+            logger.error(f"Validation error in stream_response: {e}", exc_info=True)
+            # Update message status to failed
+            try:
+                await self.message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=MessageUpdate(status=MessageStatus.FAILED),
+                )
+            except Exception:
+                pass
+            error_msg = f"\n\n❌ **Error:** Invalid input data.\n\n*Details: {str(e)}*"
+            yield error_msg
+            raise ValueError(f"Invalid input data: {e}") from e
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in stream_response: {e}", exc_info=True)
+            # Update message status to failed
+            try:
+                await self.message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=MessageUpdate(status=MessageStatus.FAILED),
+                )
+            except Exception:
+                pass
+            error_msg = f"\n\n❌ **Error:** Database operation failed.\n\n*Details: {str(e)}*"
+            yield error_msg
+            raise RuntimeError(f"Database operation failed: {e}") from e
+        except ValueError as e:
+            logger.error(f"Value error in stream_response: {e}", exc_info=True)
+            # Update message status to failed
+            try:
+                await self.message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=MessageUpdate(status=MessageStatus.FAILED),
+                )
+            except Exception:
+                pass
+            error_msg = f"\n\n❌ **Error:** {str(e)}"
             yield error_msg
             raise
-
-    async def get_conversation_history(
-        self,
-        user_id: str,
-        session_id: str,
-        limit: int = 50,
-    ) -> list[dict[str, str]]:
-        """
-        Get conversation history for a session using mem0.
-
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-            limit: Maximum number of messages to return
-
-        Returns:
-            List of conversation messages
-        """
-        try:
-            # Get memories for this session
-            memories = await memory_service.get_memories(
-                user_id=user_id,
-                session_id=session_id,
-                limit=limit,
-            )
-
-            # Convert memories to conversation format
-            history = []
-            for memory in memories:
-                history.append(
-                    {
-                        "role": memory.get("role", "user"),
-                        "content": memory.get("memory", ""),
-                        "timestamp": memory.get("created_at", ""),
-                    }
+        except Exception as e:
+            logger.error(f"Unexpected error streaming response: {e}", exc_info=True)
+            # Update message status to failed
+            try:
+                await self.message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=MessageUpdate(status=MessageStatus.FAILED),
                 )
-
-            return history
-
-        except Exception as e:
-            logger.error(f"Error getting conversation history: {e}", exc_info=True)
-            return []
-
-    async def clear_session(
-        self,
-        user_id: str,
-        session_id: str,
-    ) -> bool:
-        """
-        Clear all memories for a specific chat session.
-
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Clear memories for this session
-            await memory_service.delete_session_memories(
-                user_id=user_id,
-                session_id=session_id,
-            )
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error clearing session: {e}", exc_info=True)
-            return False
-
-    def _format_tool_call_start(self, tool_name: str, args: dict[str, Any]) -> str:
-        """Format the start of a tool call as markdown."""
-        args_str = json.dumps(args, indent=2) if args else "{}"
-        return f"\n\n🔧 **Calling tool: `{tool_name}`**\n```json\n{args_str}\n```\n\n"
-
-    def _format_tool_call_result(self, tool_name: str, result: str) -> str:
-        """Format tool call result as markdown."""
-        return f"✅ **Tool `{tool_name}` completed:**\n> {result}\n\n"
-
-    def _format_thinking_start(self) -> str:
-        """Format the start of AI thinking process."""
-        return "🤔 **Thinking...**\n\n"
-
-    def _format_response_start(self) -> str:
-        """Format the start of the final response."""
-        return "💬 **Response:**\n\n"
-
-    def _format_markdown_response(self, text: str) -> str:
-        """
-        Format text as markdown for streaming.
-
-        This method ensures that text is properly formatted for markdown rendering
-        on the frontend, including code blocks, lists, and other formatting.
-        """
-        # For basic streaming, we return the text as-is
-        # The frontend should handle markdown parsing
-        return text
-
-    def _format_streaming_chunk(self, chunk: str, chunk_type: str = "text") -> str:
-        """
-        Format a streaming chunk with metadata for frontend parsing.
-
-        Args:
-            chunk: The text chunk to format
-            chunk_type: Type of chunk (text, tool_call, tool_result, error)
-
-        Returns:
-            Formatted chunk with metadata
-        """
-        if chunk_type == "text":
-            # For text chunks, just return the markdown content
-            return chunk
-        elif chunk_type == "tool_call":
-            # Tool calls are already formatted as markdown
-            return chunk
-        elif chunk_type == "tool_result":
-            # Tool results are already formatted as markdown
-            return chunk
-        elif chunk_type == "error":
-            # Error messages are already formatted as markdown
-            return chunk
-        else:
-            return chunk
-
-    def _format_thinking_chunk(self, content: str) -> str:
-        """Format thinking/reasoning content as markdown."""
-        return f"🤔 **Thinking:** {content}\n\n"
-
-    def _format_code_block(self, code: str, language: str = "") -> str:
-        """Format code as a markdown code block."""
-        return f"```{language}\n{code}\n```\n\n"
-
-    def _format_list_item(self, item: str, ordered: bool = False, index: int = 1) -> str:
-        """Format a list item."""
-        if ordered:
-            return f"{index}. {item}\n"
-        else:
-            return f"- {item}\n"
-
-    def _format_blockquote(self, text: str) -> str:
-        """Format text as a blockquote."""
-        lines = text.split("\n")
-        return "\n".join(f"> {line}" for line in lines) + "\n\n"
-
-    def _format_header(self, text: str, level: int = 1) -> str:
-        """Format text as a markdown header."""
-        return f"{'#' * level} {text}\n\n"
-
-    def _format_emphasis(self, text: str, strong: bool = False) -> str:
-        """Format text with emphasis."""
-        if strong:
-            return f"**{text}**"
-        else:
-            return f"*{text}*"
-
-    def _format_link(self, text: str, url: str) -> str:
-        """Format a markdown link."""
-        return f"[{text}]({url})"
-
-    def _format_table_row(self, columns: list[str], is_header: bool = False) -> str:
-        """Format a table row in markdown."""
-        row = "| " + " | ".join(columns) + " |"
-        if is_header:
-            separator = "| " + " | ".join(["---"] * len(columns)) + " |"
-            return f"{row}\n{separator}\n"
-        else:
-            return f"{row}\n"
+            except Exception:
+                pass
+            error_msg = f"\n\n❌ **Error:** Unable to generate response. Please try again.\n\n*Details: {str(e)}*"
+            yield error_msg
+            raise RuntimeError(f"Failed to stream response: {e}") from e
 
 
-chat_service = ChatService()
+def create_chat_service(db: AsyncSession) -> ChatService:
+    """
+    Factory function to create a ChatService instance with a database session.
+    Args:
+        db: Database session
+    Returns:
+        ChatService instance
+    """
+    return ChatService(db=db)
