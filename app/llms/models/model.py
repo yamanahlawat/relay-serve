@@ -7,10 +7,10 @@ from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base_class import TimeStampedBase
+from app.llms.models.provider import LLMProvider
 
 if TYPE_CHECKING:
     from app.chat.models.session import ChatSession
-    from app.llms.models.provider import LLMProvider
 
 
 class LLMModel(TimeStampedBase):
@@ -41,13 +41,11 @@ class LLMModel(TimeStampedBase):
     default_top_p: Mapped[float] = mapped_column(default=0.9)
 
     # Foreign Keys
-    provider_id: Mapped[UUID] = mapped_column(ForeignKey("llm_provider.id"))
+    provider_id: Mapped[UUID] = mapped_column(ForeignKey(LLMProvider.id))
 
     # Relationships
-    provider: Mapped["LLMProvider"] = relationship("LLMProvider", back_populates="models")
-    sessions: Mapped[list["ChatSession"]] = relationship(
-        "ChatSession", back_populates="llm_model", cascade="all, delete-orphan"
-    )
+    provider: Mapped[LLMProvider] = relationship(back_populates="models")
+    sessions: Mapped[list["ChatSession"]] = relationship(back_populates="llm_model", cascade="all, delete-orphan")
 
     @property
     def pydantic_ai_model_string(self) -> str:

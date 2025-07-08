@@ -43,9 +43,7 @@ class LLMProvider(TimeStampedBase):
     base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Relationships
-    models: Mapped[list["LLMModel"]] = relationship("LLMModel", back_populates="provider", cascade="all, delete-orphan")
-    sessions: Mapped[list["ChatSession"]] = relationship(
-        "ChatSession", back_populates="provider", cascade="all, delete-orphan"
-    )
+    models: Mapped[list["LLMModel"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
+    sessions: Mapped[list["ChatSession"]] = relationship(back_populates="provider", cascade="all, delete-orphan")
 
     __table_args__ = (UniqueConstraint("name", name="uq_provider_name"),)
