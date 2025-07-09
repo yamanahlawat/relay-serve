@@ -1,46 +1,53 @@
-"""Service layer for LLM model operations."""
-
 from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llms.crud.model import crud_model
-from app.llms.crud.provider import crud_provider
-from app.llms.exceptions import DuplicateModelException, ModelNotFoundException, ProviderNotFoundException
-from app.llms.models.model import LLMModel
-from app.llms.schemas.model import ModelCreate, ModelUpdate
+from app.llms.crud import crud_model
+from app.llms.exceptions import DuplicateModelException, ModelNotFoundException
+from app.llms.models import LLMModel
+from app.llms.schemas import ModelCreate, ModelUpdate
+from app.llms.services.provider import LLMProviderService
 
 
 class LLMModelService:
-    """Service for managing LLM models."""
-
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def _check_duplicate_name(self, provider_id: UUID, model_name: str) -> None:
+        """
+        Check for duplicate model names for a given provider.
+        Args:
+            provider_id (UUID): The ID of the provider.
+            model_name (str): The name of the model.
+        Raises:
+            DuplicateModelException: If a model with the same name already exists for the provider.
+        """
+        # Check if model with same name exists for this provider
+        filters = [
+            crud_model.model.provider_id == provider_id,
+            crud_model.model.name == model_name,
+        ]
+        existing_model = await crud_model.filter(
+            db=self.db,
+            filters=filters,
+        )
+        if existing_model:
+            raise DuplicateModelException(model_name=model_name)
 
     async def create_model(self, model_in: ModelCreate) -> LLMModel:
         """
         Create a new LLM model.
         Args:
-            model_in: Model creation data
+            model_in (ModelCreate): The model creation data.
         Returns:
-            Created model
-        Raises:
-            ProviderNotFoundException: If provider not found
-            DuplicateModelException: If model name already exists for provider
+            LLMModel: The created model.
         """
-        # Check if provider exists
-        provider = await crud_provider.get(db=self.db, id=model_in.provider_id)
-        if not provider:
-            raise ProviderNotFoundException(provider_id=str(model_in.provider_id))
-
-        # Check if model name already exists for this provider
-        existing_model = await crud_model.get_by_provider_and_name(
-            db=self.db, provider_id=model_in.provider_id, name=model_in.name
-        )
-        if existing_model:
-            raise DuplicateModelException(model_name=model_in.name)
-
+        # Verify provider exists
+        provider_service = LLMProviderService(db=self.db)
+        await provider_service.get_provider(provider_id=model_in.provider_id)
+        # Check if model with same name already exists for this provider
+        await self._check_duplicate_name(provider_id=model_in.provider_id, model_name=model_in.name)
         return await crud_model.create(db=self.db, obj_in=model_in)
 
     async def list_models(
@@ -54,85 +61,66 @@ class LLMModelService:
         """
         List models with optional filtering.
         Args:
-            provider_id: Filter by provider ID
-            is_active: Filter by active status
-            model_name: Filter by model name
-            offset: Number of records to skip
-            limit: Maximum number of records to return
+            provider_id (UUID | None, optional): Filter by provider ID. Defaults to None.
+            is_active (bool | None, optional): Filter by active status. Defaults to None.
+            model_name (str | None, optional): Filter by model name. Defaults to None.
+            offset (int, optional): Number of records to skip. Defaults to 0.
+            limit (int, optional): Maximum number of records to return. Defaults to 10.
         Returns:
-            List of models
+            Sequence[LLMModel]: List of models.
         """
-        return await crud_model.get_multi(
-            db=self.db,
-            skip=offset,
-            limit=limit,
-            provider_id=provider_id,
-            is_active=is_active,
-            name=model_name,
-        )
-
-    async def list_all_models(self) -> dict[str, list[LLMModel]]:
-        """
-        List all models grouped by provider.
-        Returns:
-            Dictionary with provider names as keys and model lists as values
-        """
-        return await crud_model.list_models_by_provider(db=self.db)
+        filters = []
+        if provider_id:
+            filters.append(crud_model.model.provider_id == provider_id)
+        if is_active is not None:
+            filters.append(crud_model.model.is_active == is_active)
+        if model_name:
+            filters.append(crud_model.model.name.ilike(f"%{model_name}%"))
+        models = await crud_model.filter(db=self.db, filters=filters, offset=offset, limit=limit)
+        return models
 
     async def get_model(self, llm_model_id: UUID) -> LLMModel:
         """
-        Get a specific model by ID.
+        Get a specific LLM model by its ID.
         Args:
-            llm_model_id: UUID of the model
-        Returns:
-            Model instance
+            llm_model_id (UUID): The ID of the model.
         Raises:
-            ModelNotFoundException: If model not found
+            ModelNotFoundException: If the model is not found.
+        Returns:
+            LLMModel: The requested model.
         """
         model = await crud_model.get(db=self.db, id=llm_model_id)
         if not model:
-            raise ModelNotFoundException(model_id=str(llm_model_id))
+            raise ModelNotFoundException(model_id=llm_model_id)
         return model
 
-    async def update_model(self, llm_model_id: UUID, model_in: ModelUpdate) -> LLMModel:
+    async def update_model(self, llm_model_id: UUID, model_in: ModelUpdate) -> LLMModel | None:
         """
-        Update a model.
+        Update an existing LLM model.
         Args:
-            llm_model_id: UUID of the model to update
-            model_in: Model update data
+            llm_model_id (UUID): The ID of the model to update.
+            model_in (ModelUpdate): The updated model data.
         Returns:
-            Updated model
-        Raises:
-            ModelNotFoundException: If model not found
-            DuplicateModelException: If updated name already exists for provider
+            LLMModel | None: The updated model or None if not found.
         """
-        model = await crud_model.get(db=self.db, id=llm_model_id)
-        if not model:
-            raise ModelNotFoundException(model_id=str(llm_model_id))
-
-        # Check for duplicate name if name is being updated
-        if model_in.name and model_in.name != model.name:
-            existing_model = await crud_model.get_by_provider_and_name(
-                db=self.db, provider_id=model.provider_id, name=model_in.name
-            )
-            if existing_model:
-                raise DuplicateModelException(model_name=model_in.name)
-
-        updated_model = await crud_model.update(db=self.db, id=llm_model_id, obj_in=model_in)
-        if not updated_model:
-            raise ModelNotFoundException(model_id=str(llm_model_id))
-        return updated_model
+        llm_model = await self.get_model(llm_model_id=llm_model_id)
+        if model_in.name and model_in.name != llm_model.name:
+            await self._check_duplicate_name(provider_id=llm_model.provider_id, model_name=model_in.name)
+        return await crud_model.update(db=self.db, id=llm_model.id, obj_in=model_in)
 
     async def delete_model(self, llm_model_id: UUID) -> None:
         """
-        Delete a model.
+        Delete an LLM model by its ID.
         Args:
-            llm_model_id: UUID of the model to delete
-        Raises:
-            ModelNotFoundException: If model not found
+            llm_model_id (UUID): The ID of the model to delete.
         """
-        model = await crud_model.get(db=self.db, id=llm_model_id)
-        if not model:
-            raise ModelNotFoundException(model_id=str(llm_model_id))
+        llm_model = await self.get_model(llm_model_id=llm_model_id)
+        await crud_model.delete(db=self.db, id=llm_model.id)
 
-        await crud_model.delete(db=self.db, id=llm_model_id)
+    async def list_all_models(self) -> dict[str, list[LLMModel]]:
+        """
+        List all LLM models grouped by provider.
+        Returns:
+            dict[str, list[LLMModel]]: A dictionary where the keys are provider IDs and the values are lists of models.
+        """
+        return await crud_model.list_models_by_provider(db=self.db)
