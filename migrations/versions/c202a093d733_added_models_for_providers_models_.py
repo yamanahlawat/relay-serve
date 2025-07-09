@@ -1,8 +1,8 @@
 """Added models for providers, models, session, message, attachments
 
-Revision ID: 3f3e737e7f8e
+Revision ID: c202a093d733
 Revises:
-Create Date: 2025-07-06 14:30:01.212509
+Create Date: 2025-07-09 02:32:59.799793
 
 """
 
@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "3f3e737e7f8e"
+revision: str = "c202a093d733"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -35,24 +35,25 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_attachments_id"), "attachments", ["id"], unique=False)
     op.create_table(
-        "llm_provider",
+        "llm_providers",
         sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column(
-            "provider_type",
+            "type",
             sa.Enum("OPENAI", "ANTHROPIC", "GEMINI", "GROQ", "MISTRAL", "COHERE", "BEDROCK", name="providertype"),
             nullable=False,
         ),
-        sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("api_key", sa.String(length=500), nullable=True),
-        sa.Column("base_url", sa.String(length=500), nullable=True),
+        sa.Column("api_key", sa.String(length=255), nullable=True),
+        sa.Column("base_url", sa.String(length=255), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_provider_name"),
     )
-    op.create_index(op.f("ix_llm_provider_id"), "llm_provider", ["id"], unique=False)
-    op.create_index(op.f("ix_llm_provider_provider_type"), "llm_provider", ["provider_type"], unique=False)
+    op.create_index(op.f("ix_llm_providers_id"), "llm_providers", ["id"], unique=False)
+    op.create_index(op.f("ix_llm_providers_name"), "llm_providers", ["name"], unique=False)
+    op.create_index(op.f("ix_llm_providers_type"), "llm_providers", ["type"], unique=False)
     op.create_table(
         "mcp_servers",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -68,25 +69,24 @@ def upgrade() -> None:
     op.create_index(op.f("ix_mcp_servers_id"), "mcp_servers", ["id"], unique=False)
     op.create_index(op.f("ix_mcp_servers_name"), "mcp_servers", ["name"], unique=True)
     op.create_table(
-        "llm_model",
+        "llm_models",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=200), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("context_length", sa.Integer(), nullable=True),
-        sa.Column("default_temperature", sa.Float(), nullable=False),
         sa.Column("default_max_tokens", sa.Integer(), nullable=True),
+        sa.Column("default_temperature", sa.Float(), nullable=False),
         sa.Column("default_top_p", sa.Float(), nullable=False),
         sa.Column("provider_id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
             ["provider_id"],
-            ["llm_provider.id"],
+            ["llm_providers.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("provider_id", "name", name="uq_provider_model"),
     )
-    op.create_index(op.f("ix_llm_model_id"), "llm_model", ["id"], unique=False)
+    op.create_index(op.f("ix_llm_models_id"), "llm_models", ["id"], unique=False)
     op.create_table(
         "chat_sessions",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -99,8 +99,8 @@ def upgrade() -> None:
         sa.Column("last_message_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["llm_model_id"], ["llm_model.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["provider_id"], ["llm_provider.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["llm_model_id"], ["llm_models.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["provider_id"], ["llm_providers.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_chat_sessions_id"), "chat_sessions", ["id"], unique=False)
@@ -178,14 +178,15 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_chat_sessions_last_message_at"), table_name="chat_sessions")
     op.drop_index(op.f("ix_chat_sessions_id"), table_name="chat_sessions")
     op.drop_table("chat_sessions")
-    op.drop_index(op.f("ix_llm_model_id"), table_name="llm_model")
-    op.drop_table("llm_model")
+    op.drop_index(op.f("ix_llm_models_id"), table_name="llm_models")
+    op.drop_table("llm_models")
     op.drop_index(op.f("ix_mcp_servers_name"), table_name="mcp_servers")
     op.drop_index(op.f("ix_mcp_servers_id"), table_name="mcp_servers")
     op.drop_table("mcp_servers")
-    op.drop_index(op.f("ix_llm_provider_provider_type"), table_name="llm_provider")
-    op.drop_index(op.f("ix_llm_provider_id"), table_name="llm_provider")
-    op.drop_table("llm_provider")
+    op.drop_index(op.f("ix_llm_providers_type"), table_name="llm_providers")
+    op.drop_index(op.f("ix_llm_providers_name"), table_name="llm_providers")
+    op.drop_index(op.f("ix_llm_providers_id"), table_name="llm_providers")
+    op.drop_table("llm_providers")
     op.drop_index(op.f("ix_attachments_id"), table_name="attachments")
     op.drop_table("attachments")
     # ### end Alembic commands ###

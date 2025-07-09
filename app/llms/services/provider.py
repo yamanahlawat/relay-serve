@@ -1,37 +1,41 @@
-"""Service layer for LLM provider operations."""
-
 from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llms.crud.provider import crud_provider
+from app.llms.crud import crud_provider
 from app.llms.exceptions import DuplicateProviderException, ProviderNotFoundException
-from app.llms.models.provider import LLMProvider
-from app.llms.schemas.provider import ProviderCreate, ProviderUpdate
+from app.llms.models import LLMProvider
+from app.llms.schemas import ProviderCreate, ProviderUpdate
 
 
 class LLMProviderService:
-    """Service for managing LLM providers."""
-
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def check_duplicate_name(self, provider_name: str) -> None:
+        """
+        Check if a provider with the same name already exists.
+        Args:
+            provider_name (str): The name of the provider to check.
+        Raises:
+            DuplicateProviderException: If a provider with the same name already exists.
+        """
+        # Check if provider with same name already exists
+        filters = [crud_provider.model.name == provider_name]
+        existing_provider = await crud_provider.filter(db=self.db, filters=filters)
+        if existing_provider:
+            raise DuplicateProviderException(provider_name=provider_name)
 
     async def create_provider(self, provider_in: ProviderCreate) -> LLMProvider:
         """
         Create a new LLM provider.
         Args:
-            provider_in: Provider creation data
+            provider_in (ProviderCreate): The provider creation data.
         Returns:
-            Created provider
-        Raises:
-            DuplicateProviderException: If provider name already exists
+            LLMProvider: The created provider.
         """
-        # Check if provider name already exists
-        existing_provider = await crud_provider.get_by_name(db=self.db, name=provider_in.name)
-        if existing_provider:
-            raise DuplicateProviderException(provider_name=provider_in.name)
-
+        await self.check_duplicate_name(provider_in.name)
         return await crud_provider.create(db=self.db, obj_in=provider_in)
 
     async def list_providers(
@@ -42,75 +46,56 @@ class LLMProviderService:
         limit: int = 10,
     ) -> Sequence[LLMProvider]:
         """
-        List providers with optional filtering.
+        List all LLM providers with optional filtering.
         Args:
-            is_active: Filter by active status
-            provider_name: Filter by provider name
-            offset: Number of records to skip
-            limit: Maximum number of records to return
+            is_active (bool | None, optional): Filter by active status. Defaults to None.
+            provider_name (str | None, optional): Filter by provider name. Defaults to None.
+            offset (int, optional): Number of records to skip. Defaults to 0.
+            limit (int, optional): Maximum number of records to return. Defaults to 10.
         Returns:
-            List of providers
+            Sequence[LLMProvider]: List of providers.
         """
-        return await crud_provider.get_multi(
-            db=self.db,
-            skip=offset,
-            limit=limit,
-            is_active=is_active,
-            name=provider_name,
-        )
+        filters = []
+        if is_active is not None:
+            filters.append(crud_provider.model.is_active == is_active)
+        if provider_name:
+            filters.append(crud_provider.model.name.ilike(f"%{provider_name}%"))
+        return await crud_provider.filter(db=self.db, filters=filters, offset=offset, limit=limit)
 
     async def get_provider(self, provider_id: UUID) -> LLMProvider:
         """
-        Get a specific provider by ID.
+        Get a specific LLM provider by its ID.
         Args:
-            provider_id: UUID of the provider
-        Returns:
-            Provider instance
+            provider_id (UUID): The ID of the provider.
         Raises:
-            ProviderNotFoundException: If provider not found
+            ProviderNotFoundException: If the provider is not found.
+        Returns:
+            LLMProvider: The requested provider.
         """
         provider = await crud_provider.get(db=self.db, id=provider_id)
         if not provider:
-            raise ProviderNotFoundException(provider_id=str(provider_id))
+            raise ProviderNotFoundException(provider_id=provider_id)
         return provider
 
-    async def update_provider(self, provider_id: UUID, provider_in: ProviderUpdate) -> LLMProvider:
+    async def update_provider(self, provider_id: UUID, provider_in: ProviderUpdate) -> LLMProvider | None:
         """
-        Update a provider.
+        Update an existing LLM provider.
         Args:
-            provider_id: UUID of the provider to update
-            provider_in: Provider update data
+            provider_id (UUID): The ID of the provider to update.
+            provider_in (ProviderUpdate): The provider update data.
         Returns:
-            Updated provider
-        Raises:
-            ProviderNotFoundException: If provider not found
-            DuplicateProviderException: If updated name already exists
+            LLMProvider | None: The updated provider or None if not found.
         """
-        provider = await crud_provider.get(db=self.db, id=provider_id)
-        if not provider:
-            raise ProviderNotFoundException(provider_id=str(provider_id))
-
-        # Check for duplicate name if name is being updated
+        provider = await self.get_provider(provider_id=provider_id)
         if provider_in.name and provider_in.name != provider.name:
-            existing_provider = await crud_provider.get_by_name(db=self.db, name=provider_in.name)
-            if existing_provider:
-                raise DuplicateProviderException(provider_name=provider_in.name)
+            await self.check_duplicate_name(provider_in.name)
+        return await crud_provider.update(db=self.db, id=provider.id, obj_in=provider_in)
 
-        updated_provider = await crud_provider.update(db=self.db, id=provider_id, obj_in=provider_in)
-        if not updated_provider:
-            raise ProviderNotFoundException(provider_id=str(provider_id))
-        return updated_provider
-
-    async def delete_provider(self, provider_id: UUID) -> None:
+    async def delete_provider(self, provider_id: UUID):
         """
-        Delete a provider.
+        Delete an existing LLM provider.
         Args:
-            provider_id: UUID of the provider to delete
-        Raises:
-            ProviderNotFoundException: If provider not found
+            provider_id (UUID): The ID of the provider to delete.
         """
-        provider = await crud_provider.get(db=self.db, id=provider_id)
-        if not provider:
-            raise ProviderNotFoundException(provider_id=str(provider_id))
-
-        await crud_provider.delete(db=self.db, id=provider_id)
+        provider = await self.get_provider(provider_id=provider_id)
+        await crud_provider.delete(db=self.db, id=provider.id)

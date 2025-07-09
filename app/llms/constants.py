@@ -1,4 +1,6 @@
-"""Provider types for LLM providers based on pydantic_ai support."""
+"""
+Provider types for LLM providers based on pydantic_ai support.
+"""
 
 from app.core.constants import BaseEnum
 
