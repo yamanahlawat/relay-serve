@@ -29,7 +29,7 @@ class ChatService:
 
     def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
         """Generate a unique key for caching agents."""
-        return f"{provider.provider_type.value}:{model.name}"
+        return f"{provider.type.value}:{model.name}"
 
     def _get_or_create_agent(
         self,
@@ -66,7 +66,7 @@ class ChatService:
             recent_messages = await self.message_service.list_messages(
                 session_id=session_id,
                 offset=0,
-                limit=10,  # Get last 10 messages for context
+                limit=50,  # Adjust limit as needed
             )
 
             # Add recent messages to context if found

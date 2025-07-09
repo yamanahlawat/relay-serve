@@ -37,13 +37,10 @@ class ProviderFactory:
     def get_builder(cls, provider_type: ProviderType) -> ProviderBuilder:
         """
         Get the appropriate builder for the given provider type.
-
         Args:
             provider_type: The type of provider
-
         Returns:
             Builder instance for the provider type
-
         Raises:
             ValueError: If provider type is not supported
         """
@@ -56,11 +53,9 @@ class ProviderFactory:
     def register_builder(cls, provider_type: ProviderType, builder_class: type[ProviderBuilder]) -> None:
         """
         Register a new provider builder.
-
         Args:
             provider_type: The provider type to register
             builder_class: The builder class to register
-
         This allows for extending the factory with custom provider builders.
         """
         cls._builders[provider_type] = builder_class
@@ -73,18 +68,15 @@ class ProviderFactory:
     ) -> Any:
         """
         Create a pydantic-ai model instance from provider and model configuration.
-
         Args:
             provider: The LLM provider instance
             model: The LLM model instance
-
         Returns:
             Configured pydantic-ai model instance
-
         Raises:
             ValueError: If provider type is not supported
         """
-        builder = cls.get_builder(provider.provider_type)
+        builder = cls.get_builder(provider.type)
         return builder.build_model(provider, model)
 
     @classmethod
@@ -97,18 +89,15 @@ class ProviderFactory:
     ) -> Agent:
         """
         Create a pydantic-ai agent from provider and model configuration.
-
         Args:
             provider: The LLM provider instance
             model: The LLM model instance
             system_prompt: Optional system prompt for the agent
             tools: Optional list of tools for the agent
-
         Returns:
             Configured pydantic-ai Agent instance
-
         Raises:
             ValueError: If provider type is not supported
         """
-        builder = cls.get_builder(provider.provider_type)
+        builder = cls.get_builder(provider.type)
         return builder.build_agent(provider, model, system_prompt, tools)

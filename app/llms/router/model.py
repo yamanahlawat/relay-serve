@@ -1,5 +1,3 @@
-"""Model API router."""
-
 from typing import Sequence
 from uuid import UUID
 
@@ -55,7 +53,6 @@ async def create_model(
     - **model_in**: Model creation parameters containing:
     - **name**: Name of the model (must be unique per provider)
     - **provider_id**: UUID of the provider this model belongs to
-    - **context_length**: Maximum context length (optional)
     - **default_temperature**: Default temperature setting
     - **default_max_tokens**: Default max tokens setting
     - **default_top_p**: Default top_p setting
@@ -185,7 +182,7 @@ async def update_model(
     model_in: ModelUpdate,
     llm_model_id: UUID,
     service: LLMModelService = Depends(get_model_service),
-) -> LLMModel:
+) -> LLMModel | None:
     """
     ## Update a Specific LLM Model Configuration
 
@@ -195,7 +192,6 @@ async def update_model(
     - **llm_model_id**: UUID of the model to update
     - **model_in**: Model update parameters containing:
     - **name** (optional): New name for the model
-    - **context_length** (optional): Updated context length
     - **default_temperature** (optional): Updated default temperature
     - **default_max_tokens** (optional): Updated default max tokens
     - **default_top_p** (optional): Updated default top_p

@@ -43,7 +43,7 @@ async def create_provider(
     ### Parameters
     - **provider_in**: Provider creation parameters containing:
     - **name**: Name of the provider (must be unique)
-    - **provider_type**: Type of provider (openai, anthropic, etc.)
+    - **type**: Type of provider (openai, anthropic, etc.)
     - **api_key**: API key for the provider (optional)
     - **base_url**: Custom base URL (optional)
     - **is_active**: Whether the provider is active (default: True)
@@ -158,7 +158,7 @@ async def update_provider(
     provider_in: ProviderUpdate,
     provider_id: UUID,
     service: LLMProviderService = Depends(get_provider_service),
-) -> LLMProvider:
+) -> LLMProvider | None:
     """
     ## Update a Specific LLM Provider
 
@@ -168,7 +168,7 @@ async def update_provider(
     - **provider_id**: UUID of the provider to update
     - **provider_in**: Provider update parameters containing:
     - **name** (optional): New name for the provider
-    - **provider_type** (optional): Updated provider type
+    - **type** (optional): Updated provider type
     - **api_key** (optional): Updated API key
     - **base_url** (optional): Updated base URL
     - **is_active** (optional): Updated active status

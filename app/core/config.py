@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
+from pydantic import HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.constants import Environment, StorageProvider
@@ -55,19 +55,6 @@ class RedisSettings(BaseSettings):
         )
 
 
-class LLMSettings(BaseSettings):
-    """Settings for LLM configuration."""
-
-    # Default model settings
-    DEFAULT_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
-    DEFAULT_MAX_TOKENS: int = 2048
-    DEFAULT_TOP_P: float = Field(default=0.9, ge=0.0, le=1.0)
-
-    # Agent configuration
-    DEFAULT_RETRIES: int = 3
-    ENABLE_LOGFIRE: bool = False
-
-
 class Settings(BaseSettings):
     """
     Handles config and settings for relay serve.
@@ -105,9 +92,6 @@ class Settings(BaseSettings):
 
     # Search
     TAVILY_SEARCH_API_KEY: SecretStr | None = None
-
-    # AI Configuration
-    LLM: LLMSettings = LLMSettings()
 
     model_config = SettingsConfigDict(
         env_file=".env",
