@@ -39,7 +39,7 @@ class OpenAIProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             openai_provider = OpenAIProvider(**provider_config)
-            return OpenAIModel(model.name, provider=openai_provider)
+            return OpenAIModel(model_name=model.name, provider=openai_provider)
         else:
             # Use default provider with environment variables
-            return OpenAIModel(model.name)
+            return OpenAIModel(model_name=model.name)

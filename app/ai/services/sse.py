@@ -5,7 +5,7 @@ from fastapi import BackgroundTasks
 from loguru import logger
 from redis.asyncio import Redis
 
-from app.chat.schemas.stream import StreamEvent, StreamResponse
+from app.ai.schemas.stream import StreamEvent, StreamResponse
 from app.core.config import settings
 
 

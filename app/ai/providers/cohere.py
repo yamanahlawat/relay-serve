@@ -34,6 +34,6 @@ class CohereProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             cohere_provider = CohereProvider(**provider_config)
-            return CohereModel(model.name, provider=cohere_provider)
+            return CohereModel(model_name=model.name, provider=cohere_provider)
         else:
-            return CohereModel(model.name)
+            return CohereModel(model_name=model.name)

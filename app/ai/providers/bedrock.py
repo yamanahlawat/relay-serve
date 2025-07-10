@@ -38,6 +38,6 @@ class BedrockProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             bedrock_provider = BedrockProvider(**provider_config)
-            return BedrockConverseModel(model.name, provider=bedrock_provider)
+            return BedrockConverseModel(model_name=model.name, provider=bedrock_provider)
         else:
-            return BedrockConverseModel(model.name)
+            return BedrockConverseModel(model_name=model.name)

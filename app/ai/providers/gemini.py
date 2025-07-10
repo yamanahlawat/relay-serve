@@ -29,4 +29,4 @@ class GeminiProviderBuilder(ProviderBuilder):
         # For Gemini, we typically use the default provider
         # Custom configuration would need to be handled through environment variables
         # or custom client configuration
-        return GeminiModel(model.name)
+        return GeminiModel(model_name=model.name)
