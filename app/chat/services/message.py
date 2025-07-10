@@ -38,6 +38,22 @@ class ChatMessageService:
             message.usage = message.get_usage()
         return messages
 
+    async def get_session_context(
+        self, session_id: UUID, exclude_message_id: UUID | None = None
+    ) -> Sequence[ChatMessage]:
+        """
+        Get the context of a chat session, including all messages.
+        Args:
+            session_id (UUID): ID of the chat session
+        Returns:
+            Sequence[ChatMessage]: List of messages in the session
+        """
+        return await crud_message.get_session_context(
+            db=self.db,
+            session_id=session_id,
+            exclude_message_id=exclude_message_id,
+        )
+
     async def get_message(self, session_id: UUID, message_id: UUID) -> ChatMessage:
         message = await crud_message.get_with_attachments(self.db, id=message_id)
         session = await self.session_service.get_session(session_id=session_id)

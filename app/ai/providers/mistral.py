@@ -34,6 +34,6 @@ class MistralProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             mistral_provider = MistralProvider(**provider_config)
-            return MistralModel(model.name, provider=mistral_provider)
+            return MistralModel(model_name=model.name, provider=mistral_provider)
         else:
-            return MistralModel(model.name)
+            return MistralModel(model_name=model.name)
