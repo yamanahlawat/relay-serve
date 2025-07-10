@@ -49,6 +49,7 @@ class StreamBlock(BaseModel):
     - For thinking/content blocks: use 'content' field
     - For tool blocks: use tool_* fields
     - For errors: use error_* fields
+    - For completion: use usage field
     """
 
     type: StreamBlockType
@@ -68,6 +69,9 @@ class StreamBlock(BaseModel):
 
     # Final message
     message: MessageRead | None = None
+
+    # Usage information (for completion blocks)
+    usage: dict[str, Any] | None = None
 
 
 class ToolExecution(BaseModel):

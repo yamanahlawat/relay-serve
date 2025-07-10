@@ -34,6 +34,6 @@ class AnthropicProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             anthropic_provider = AnthropicProvider(**provider_config)
-            return AnthropicModel(model.name, provider=anthropic_provider)
+            return AnthropicModel(model_name=model.name, provider=anthropic_provider)
         else:
-            return AnthropicModel(model.name)
+            return AnthropicModel(model_name=model.name)

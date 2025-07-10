@@ -34,6 +34,6 @@ class GroqProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             groq_provider = GroqProvider(**provider_config)
-            return GroqModel(model.name, provider=groq_provider)
+            return GroqModel(model_name=model.name, provider=groq_provider)
         else:
-            return GroqModel(model.name)
+            return GroqModel(model_name=model.name)
