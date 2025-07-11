@@ -1,6 +1,14 @@
 from app.core.constants import BaseEnum
 
 
+class ServerType(BaseEnum):
+    """Supported MCP server types."""
+
+    STDIO = "stdio"
+    SSE = "sse"
+    STREAMABLE_HTTP = "streamable_http"
+
+
 class ServerStatus(BaseEnum):
     """
     Enum representing possible server operational statuses
