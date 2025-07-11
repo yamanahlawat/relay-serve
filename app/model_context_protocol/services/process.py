@@ -110,7 +110,8 @@ class MCPProcessManager:
             try:
                 # Prepare environment and start server
                 server_env = self._prepare_server_environment(config)
-                server_params = StdioServerParameters(command=config.command, args=config.args, env=server_env)
+                command_args = config.config.get("args", []) if config.config else []
+                server_params = StdioServerParameters(command=config.command, args=command_args, env=server_env)
 
                 # Start server process and get transport within this context
                 stdio_transport = await server_context.enter_async_context(stdio_client(server_params))

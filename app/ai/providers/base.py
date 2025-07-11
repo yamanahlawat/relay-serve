@@ -32,6 +32,7 @@ class ProviderBuilder(ABC):
         model: LLMModel,
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
+        mcp_servers: list[Any] | None = None,
     ) -> Agent:
         """
         Build a pydantic-ai agent for the given provider and model.
@@ -44,6 +45,7 @@ class ProviderBuilder(ABC):
             model: The LLM model instance
             system_prompt: Optional system prompt for the agent
             tools: Optional list of tools for the agent
+            mcp_servers: Optional list of MCP servers for the agent
 
         Returns:
             Configured pydantic-ai Agent instance
@@ -55,7 +57,11 @@ class ProviderBuilder(ABC):
             "tools": tools or [],
         }
 
+        if mcp_servers:
+            agent_kwargs["mcp_servers"] = mcp_servers
+
         if system_prompt is not None:
+            agent_kwargs["name"] = "Relay Agent"
             agent_kwargs["system_prompt"] = system_prompt
 
         return Agent(**agent_kwargs)

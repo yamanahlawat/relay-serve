@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 from loguru import logger
 from mcp import ClientSession
@@ -23,20 +23,6 @@ class MCPServerLifecycleManager:
     def __init__(self) -> None:
         self.process_manager = MCPProcessManager()
 
-    def _normalize_args(self, args: Union[List[str], Dict[str, Any]]) -> List[str]:
-        """
-        Normalize server arguments to ensure they're in the expected list format.
-
-        Args:
-            args: Server arguments, either as a list or a dict with an 'args' key
-
-        Returns:
-            List of string arguments
-        """
-        if isinstance(args, list):
-            return args
-        return args.get("args", []) if args else []
-
     def _create_server_config(self, db_server: Any) -> MCPServerBase:
         """
         Create a server configuration object from a database server model.
@@ -47,8 +33,14 @@ class MCPServerLifecycleManager:
         Returns:
             MCPServerBase configuration object
         """
-        args_list = self._normalize_args(db_server.args)
-        return MCPServerBase(command=db_server.command, args=args_list, enabled=db_server.enabled, env=db_server.env)
+        config = db_server.config or {}
+        return MCPServerBase(
+            command=db_server.command,
+            server_type=db_server.server_type,
+            config=config,
+            enabled=db_server.enabled,
+            env=db_server.env,
+        )
 
     async def start_enabled_servers(self) -> None:
         """
@@ -138,7 +130,13 @@ class MCPServerLifecycleManager:
             config: New server configuration
         """
         # Update in database
-        update_data = MCPServerUpdate(command=config.command, args=config.args, enabled=config.enabled, env=config.env)
+        update_data = MCPServerUpdate(
+            command=config.command,
+            server_type=config.server_type,
+            config=config.config,
+            enabled=config.enabled,
+            env=config.env,
+        )
 
         db_server = await crud_mcp_server.get_by_name(db, name=name)
         if not db_server:

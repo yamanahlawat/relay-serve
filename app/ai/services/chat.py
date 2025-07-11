@@ -31,6 +31,7 @@ from app.chat.services.message import ChatMessageService
 from app.chat.services.session import ChatSessionService
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
+from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
 class ChatService:
@@ -42,27 +43,45 @@ class ChatService:
         self._agents: dict[str, Agent] = {}
         self.message_service = ChatMessageService(db=db)
         self.session_service = ChatSessionService(db=db)
+        # Initialize MCP domain service for server management
+        self.mcp_service = MCPServerDomainService(db=db)
 
     def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
         """Generate a unique key for caching agents."""
         return f"{provider.type.value}:{model.name}"
 
-    def _get_or_create_agent(
+    async def _get_mcp_servers_for_agent(self) -> list:
+        """Get MCP servers for pydantic-ai agent."""
+        try:
+            mcp_servers = await self.mcp_service.get_mcp_servers_for_agent()
+            logger.debug(f"Retrieved {len(mcp_servers)} MCP servers for agent")
+            return mcp_servers
+        except Exception as e:
+            logger.warning(f"Failed to get MCP servers: {e}")
+            return []
+
+    async def _get_or_create_agent(
         self,
         provider: LLMProvider,
         model: LLMModel,
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
     ) -> Agent:
-        """Get or create a cached agent for the provider."""
+        """Get or create a cached agent for the provider with MCP tools."""
         cache_key = self._get_agent_key(provider, model)
 
         if cache_key not in self._agents:
+            # Get MCP servers for the agent
+            mcp_servers = await self._get_mcp_servers_for_agent()
+
+            logger.debug(f"Creating agent with {len(tools or [])} manual tools and {len(mcp_servers)} MCP servers")
+
             self._agents[cache_key] = ProviderFactory.create_agent(
                 provider=provider,
                 model=model,
                 system_prompt=system_prompt,
                 tools=tools,
+                mcp_servers=mcp_servers,
             )
 
         return self._agents[cache_key]
@@ -151,7 +170,7 @@ class ChatService:
             )
 
             # Get or create agent
-            agent = self._get_or_create_agent(
+            agent = await self._get_or_create_agent(
                 provider=provider,
                 model=model,
                 system_prompt=system_prompt,
@@ -178,136 +197,139 @@ class ChatService:
             model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
 
             # Use pydantic_ai's rich streaming with message history and current user prompt
-            async with agent.iter(
-                user_prompt=message_content,
-                message_history=message_history,
-                model_settings=model_settings,
-            ) as run:
-                async for node in run:
-                    if agent.is_user_prompt_node(node):
-                        # User prompt node - show what we're processing
-                        yield StreamBlockFactory.create_thinking_block().model_dump_json()
+            async with agent.run_mcp_servers():
+                async with agent.iter(
+                    user_prompt=message_content,
+                    message_history=message_history,
+                    model_settings=model_settings,
+                ) as run:
+                    async for node in run:
+                        if agent.is_user_prompt_node(node):
+                            # User prompt node - show what we're processing
+                            yield StreamBlockFactory.create_thinking_block().model_dump_json()
 
-                    elif agent.is_model_request_node(node):
-                        # Model request node - stream partial request tokens
-                        yield StreamBlockFactory.create_thinking_block().model_dump_json()
+                        elif agent.is_model_request_node(node):
+                            # Model request node - stream partial request tokens
+                            yield StreamBlockFactory.create_thinking_block().model_dump_json()
 
-                        async with node.stream(run.ctx) as request_stream:
-                            async for event in request_stream:
-                                if isinstance(event, PartStartEvent):
-                                    # Starting a new part (text or tool call)
-                                    part_type = type(event.part).__name__
-                                    part_info = ""
+                            async with node.stream(run.ctx) as request_stream:
+                                async for event in request_stream:
+                                    if isinstance(event, PartStartEvent):
+                                        # Starting a new part (text or tool call)
+                                        part_type = type(event.part).__name__
+                                        part_info = ""
 
-                                    if part_type == "ToolCallPart":
-                                        part_info = f"tool_name={getattr(event.part, 'tool_name', 'unknown')}, tool_call_id={getattr(event.part, 'tool_call_id', 'unknown')}"
-                                        # Initialize accumulator for this tool call
-                                        tool_call_id = getattr(event.part, "tool_call_id", "unknown")
-                                        tool_args_accumulator[tool_call_id] = ""
-                                    elif part_type == "TextPart":
-                                        part_info = f"content={repr(getattr(event.part, 'content', ''))}"
-                                    else:
-                                        part_info = repr(event.part)
-
-                                    yield StreamBlockFactory.create_part_start_block(
-                                        part_index=event.index,
-                                        part_type=part_type,
-                                        part_info=part_info,
-                                    ).model_dump_json()
-
-                                elif isinstance(event, PartDeltaEvent):
-                                    if isinstance(event.delta, TextPartDelta):
-                                        # Text content delta - stream it for real-time display
-                                        content = event.delta.content_delta
-                                        if content:
-                                            yield StreamBlockFactory.create_text_delta_block(content).model_dump_json()
-
-                                    elif isinstance(event.delta, ToolCallPartDelta):
-                                        # Tool call arguments being built - show streaming args
-                                        args_delta = event.delta.args_delta
-                                        if args_delta:
-                                            # Convert args_delta to string if it's not already
-                                            args_delta_str = (
-                                                str(args_delta) if not isinstance(args_delta, str) else args_delta
-                                            )
-
-                                            # Find the tool call info from the part start event
-                                            tool_call_id = f"part_{event.index}"  # Fallback ID
-                                            tool_name = "unknown"
-
-                                            # Accumulate the args delta
-                                            if tool_call_id not in tool_args_accumulator:
-                                                tool_args_accumulator[tool_call_id] = ""
-                                            tool_args_accumulator[tool_call_id] += args_delta_str
-
-                                            # Try to parse current accumulated args
-                                            current_args = None
-                                            try:
-                                                current_args = json.loads(tool_args_accumulator[tool_call_id])
-                                            except (json.JSONDecodeError, ValueError):
-                                                # Not valid JSON yet, that's fine
-                                                pass
-
-                                            yield StreamBlockFactory.create_tool_args_delta_block(
-                                                tool_name=tool_name,
-                                                tool_call_id=tool_call_id,
-                                                args_delta=args_delta_str,
-                                                current_args=current_args,
-                                            ).model_dump_json()
-
-                                elif isinstance(event, FinalResultEvent):
-                                    # Final result from model - indicates completion
-                                    yield StreamBlockFactory.create_final_result_event_block(
-                                        tool_name=event.tool_name
-                                    ).model_dump_json()
-
-                    elif agent.is_call_tools_node(node):
-                        # Tool execution node - stream tool calls and results with full detail
-                        yield StreamBlockFactory.create_call_tools_node_start_block().model_dump_json()
-
-                        async with node.stream(ctx=run.ctx) as handle_stream:
-                            async for event in handle_stream:
-                                if isinstance(event, FunctionToolCallEvent):
-                                    # Tool is being called - show complete call info
-                                    tool_args = event.part.args
-                                    if isinstance(tool_args, str):
-                                        # Try to parse JSON string
-                                        try:
-                                            tool_args = json.loads(tool_args)
-                                        except (json.JSONDecodeError, TypeError):
-                                            tool_args = {"raw_args": tool_args}
-                                    elif not isinstance(tool_args, dict):
-                                        tool_args = {"args": tool_args}
-
-                                    yield StreamBlockFactory.create_function_tool_call_event_block(
-                                        tool_name=event.part.tool_name,
-                                        tool_call_id=event.part.tool_call_id,
-                                        tool_args=tool_args,
-                                    ).model_dump_json()
-
-                                elif isinstance(event, FunctionToolResultEvent):
-                                    # Tool result received - show complete result
-                                    result_content = ""
-                                    if hasattr(event.result, "content"):
-                                        if isinstance(event.result.content, str):
-                                            result_content = event.result.content
-                                        elif isinstance(event.result.content, list):
-                                            result_content = ", ".join(str(item) for item in event.result.content)
+                                        if part_type == "ToolCallPart":
+                                            part_info = f"tool_name={getattr(event.part, 'tool_name', 'unknown')}, tool_call_id={getattr(event.part, 'tool_call_id', 'unknown')}"
+                                            # Initialize accumulator for this tool call
+                                            tool_call_id = getattr(event.part, "tool_call_id", "unknown")
+                                            tool_args_accumulator[tool_call_id] = ""
+                                        elif part_type == "TextPart":
+                                            part_info = f"content={repr(getattr(event.part, 'content', ''))}"
                                         else:
-                                            result_content = str(event.result.content)
-                                    else:
-                                        result_content = str(event.result)
+                                            part_info = repr(event.part)
 
-                                    yield StreamBlockFactory.create_function_tool_result_event_block(
-                                        tool_call_id=event.tool_call_id,
-                                        tool_name=getattr(event, "tool_name", "unknown"),
-                                        result_content=result_content,
-                                    ).model_dump_json()
+                                        yield StreamBlockFactory.create_part_start_block(
+                                            part_index=event.index,
+                                            part_type=part_type,
+                                            part_info=part_info,
+                                        ).model_dump_json()
 
-                    elif agent.is_end_node(node):
-                        # Agent run complete - will send final message block after streaming
-                        if run.result and run.result.output:
-                            assert run.result.output == node.data.output
+                                    elif isinstance(event, PartDeltaEvent):
+                                        if isinstance(event.delta, TextPartDelta):
+                                            # Text content delta - stream it for real-time display
+                                            content = event.delta.content_delta
+                                            if content:
+                                                yield StreamBlockFactory.create_text_delta_block(
+                                                    content
+                                                ).model_dump_json()
+
+                                        elif isinstance(event.delta, ToolCallPartDelta):
+                                            # Tool call arguments being built - show streaming args
+                                            args_delta = event.delta.args_delta
+                                            if args_delta:
+                                                # Convert args_delta to string if it's not already
+                                                args_delta_str = (
+                                                    str(args_delta) if not isinstance(args_delta, str) else args_delta
+                                                )
+
+                                                # Find the tool call info from the part start event
+                                                tool_call_id = f"part_{event.index}"  # Fallback ID
+                                                tool_name = "unknown"
+
+                                                # Accumulate the args delta
+                                                if tool_call_id not in tool_args_accumulator:
+                                                    tool_args_accumulator[tool_call_id] = ""
+                                                tool_args_accumulator[tool_call_id] += args_delta_str
+
+                                                # Try to parse current accumulated args
+                                                current_args = None
+                                                try:
+                                                    current_args = json.loads(tool_args_accumulator[tool_call_id])
+                                                except (json.JSONDecodeError, ValueError):
+                                                    # Not valid JSON yet, that's fine
+                                                    pass
+
+                                                yield StreamBlockFactory.create_tool_args_delta_block(
+                                                    tool_name=tool_name,
+                                                    tool_call_id=tool_call_id,
+                                                    args_delta=args_delta_str,
+                                                    current_args=current_args,
+                                                ).model_dump_json()
+
+                                    elif isinstance(event, FinalResultEvent):
+                                        # Final result from model - indicates completion
+                                        yield StreamBlockFactory.create_final_result_event_block(
+                                            tool_name=event.tool_name
+                                        ).model_dump_json()
+
+                        elif agent.is_call_tools_node(node):
+                            # Tool execution node - stream tool calls and results with full detail
+                            yield StreamBlockFactory.create_call_tools_node_start_block().model_dump_json()
+
+                            async with node.stream(ctx=run.ctx) as handle_stream:
+                                async for event in handle_stream:
+                                    if isinstance(event, FunctionToolCallEvent):
+                                        # Tool is being called - show complete call info
+                                        tool_args = event.part.args
+                                        if isinstance(tool_args, str):
+                                            # Try to parse JSON string
+                                            try:
+                                                tool_args = json.loads(tool_args)
+                                            except (json.JSONDecodeError, TypeError):
+                                                tool_args = {"raw_args": tool_args}
+                                        elif not isinstance(tool_args, dict):
+                                            tool_args = {"args": tool_args}
+
+                                        yield StreamBlockFactory.create_function_tool_call_event_block(
+                                            tool_name=event.part.tool_name,
+                                            tool_call_id=event.part.tool_call_id,
+                                            tool_args=tool_args,
+                                        ).model_dump_json()
+
+                                    elif isinstance(event, FunctionToolResultEvent):
+                                        # Tool result received - show complete result
+                                        result_content = ""
+                                        if hasattr(event.result, "content"):
+                                            if isinstance(event.result.content, str):
+                                                result_content = event.result.content
+                                            elif isinstance(event.result.content, list):
+                                                result_content = ", ".join(str(item) for item in event.result.content)
+                                            else:
+                                                result_content = str(event.result.content)
+                                        else:
+                                            result_content = str(event.result)
+
+                                        yield StreamBlockFactory.create_function_tool_result_event_block(
+                                            tool_call_id=event.tool_call_id,
+                                            tool_name=getattr(event, "tool_name", "unknown"),
+                                            result_content=result_content,
+                                        ).model_dump_json()
+
+                        elif agent.is_end_node(node):
+                            # Agent run complete - will send final message block after streaming
+                            if run.result and run.result.output:
+                                assert run.result.output == node.data.output
 
             # Save AI response to database after streaming completes using pydantic_ai's final output
             final_output = run.result.output if run.result else None
@@ -414,130 +436,6 @@ class ChatService:
                 error_detail=str(e),
             ).model_dump_json()
             raise RuntimeError(f"Failed to stream response: {e}") from e
-
-    async def stream_markdown_response(
-        self,
-        provider: LLMProvider,
-        model: LLMModel,
-        session_id: UUID,
-        message_id: UUID,
-        system_prompt: str | None = None,
-        tools: list[Any] | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-    ) -> AsyncIterator[str]:
-        """
-        Stream a markdown response using pydantic_ai's simple streaming.
-
-        This is a simpler alternative to the rich streaming method for cases
-        where you only need text content without detailed tool tracking.
-
-        Yields:
-            JSON-serialized StreamBlock objects containing text content
-        """
-        try:
-            # Get the existing message
-            existing_message = await self.message_service.get_message(
-                session_id=session_id,
-                message_id=message_id,
-            )
-            if not existing_message or not existing_message.content:
-                raise ValueError(f"Message {message_id} not found or has no content")
-
-            message_content = existing_message.content
-
-            # Update message status to processing
-            await self.message_service.update_message(
-                session_id=session_id,
-                message_id=message_id,
-                message_in=MessageUpdate(status=MessageStatus.PROCESSING),
-            )
-
-            # Get or create agent
-            agent = self._get_or_create_agent(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                tools=tools,
-            )
-
-            # Prepare message history
-            message_history = await self._prepare_message_history(session_id=session_id)
-
-            # Prepare model settings
-            model_settings_dict = {}
-            if temperature is not None:
-                model_settings_dict["temperature"] = temperature
-            elif model.default_temperature is not None:
-                model_settings_dict["temperature"] = model.default_temperature
-
-            if max_tokens is not None:
-                model_settings_dict["max_tokens"] = max_tokens
-            elif model.default_max_tokens is not None:
-                model_settings_dict["max_tokens"] = model.default_max_tokens
-
-            # No need to track full_response manually - pydantic_ai provides final output
-            model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
-
-            # Use pydantic_ai's simple streaming for markdown
-            async with agent.run_stream(
-                user_prompt=message_content,
-                message_history=message_history,
-                model_settings=model_settings,
-            ) as result:
-                async for chunk in result.stream():
-                    if chunk:
-                        yield StreamBlockFactory.create_content_block(chunk).model_dump_json()
-
-            # Completion - final message block will serve as completion signal
-            # Save AI response to database after streaming completes using pydantic_ai's final output
-            final_output = await result.get_output() if result else None
-            if final_output and str(final_output).strip():
-                usage_data = result.usage() if result else None
-
-                # Create message with complete content and usage information
-                assistant_message = MessageCreate(
-                    content=str(final_output).strip(),
-                    role=MessageRole.ASSISTANT,
-                    status=MessageStatus.COMPLETED,
-                    parent_id=message_id,
-                )
-
-                # Add usage data if available
-                if usage_data:
-                    assistant_message.usage = MessageUsage(
-                        input_tokens=getattr(usage_data, "request_tokens", 0),
-                        output_tokens=getattr(usage_data, "response_tokens", 0),
-                        input_cost=self._calculate_input_cost(getattr(usage_data, "request_tokens", 0), model),
-                        output_cost=self._calculate_output_cost(getattr(usage_data, "response_tokens", 0), model),
-                    )
-
-                # Save the complete message to database for persistence
-                created_message = await self.message_service.create_message(
-                    message_in=assistant_message,
-                    session_id=session_id,
-                )
-
-                # Send final message block with the persisted message data and usage
-                final_block = StreamBlockFactory.create_content_block("")
-                final_block.message = MessageRead.model_validate(created_message)
-                final_block.usage = assistant_message.usage.model_dump() if assistant_message.usage else None
-                yield final_block.model_dump_json()
-
-            # Update original message status to completed
-            await self.message_service.update_message(
-                session_id=session_id,
-                message_id=message_id,
-                message_in=MessageUpdate(status=MessageStatus.COMPLETED),
-            )
-
-        except Exception as e:
-            logger.error(f"Error in stream_markdown_response: {e}", exc_info=True)
-            yield StreamBlockFactory.create_error_block(
-                error_type=type(e).__name__,
-                error_detail=str(e),
-            ).model_dump_json()
-            raise
 
     def _calculate_input_cost(self, input_tokens: int, model: LLMModel) -> float:
         """Calculate input cost based on model pricing."""
