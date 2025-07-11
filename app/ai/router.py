@@ -1,5 +1,6 @@
 """Chat router using pydantic_ai with message-based streaming."""
 
+from typing import AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
@@ -64,7 +65,7 @@ async def stream_completion(
     session = await session_service.get_active_session(session_id=session_id)
 
     # Create the AI response generator
-    async def streaming_response():
+    async def streaming_response() -> AsyncGenerator[str, None]:
         """Generate AI responses."""
         async for chunk in chat_service.stream_response(
             provider=session.provider,

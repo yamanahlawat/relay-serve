@@ -5,10 +5,9 @@ description = "Simple yet effective open source LLM Studio."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "alembic>=1.16.2",
+    "alembic>=1.16.4",
     "asyncpg>=0.30.0",
     "fastapi[standard]>=0.116.0",
-    "pydantic>=2.11.7",
     "pydantic-settings>=2.10.1",
     "sqlalchemy>=2.0.41",
     "greenlet>=3.2.3",
@@ -19,9 +18,11 @@ dependencies = [
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
     "pybase64>=1.4.1",
-    "mcp[cli]>=1.10.1",
+    "mcp[cli]>=1.11.0",
     "llm-registry>=0.4.0",
-    "pydantic-ai[logfire]>=0.3.7",
+    "alembic-postgresql-enum>=1.7.0",
+    "pydantic-ai[logfire]>=0.4.2",
+    "pydantic>=2.11.7",
 ]
 
 [dependency-groups]

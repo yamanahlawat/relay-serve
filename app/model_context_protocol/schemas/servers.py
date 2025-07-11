@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from app.model_context_protocol.constants import ServerStatus
+from app.model_context_protocol.constants import ServerStatus, ServerType
 from app.model_context_protocol.schemas.tools import MCPTool
 
 
@@ -11,27 +11,29 @@ class MCPServerBase(BaseModel):
     """
     Base schema for MCP server common attributes
 
-    This class supports both direct command execution and Docker-based MCP servers.
-    For Docker-based servers, the command should be 'docker' and args should include
-    the 'run' command and necessary parameters.
+    This class supports different MCP server types (stdio, SSE, streamable HTTP).
+    The config field contains type-specific configuration.
 
     Examples:
-    1. Direct execution:
+    1. Stdio server:
        command: "python"
-       args: ["-m", "mcp_server_tavily"]
+       server_type: "stdio"
+       config: {"args": ["-m", "mcp_server_tavily"], "timeout": 5.0}
 
-    2. Docker Gateway:
-       command: "docker"
-       args: ["run", "--rm", "-i", "alpine/socat", "STDIO", "TCP:host.docker.internal:8811"]
+    2. SSE server:
+       command: "http://localhost:3001/sse"
+       server_type: "sse"
+       config: {"timeout": 10.0, "tool_prefix": "web"}
 
-    3. Docker Container:
-       command: "docker"
-       args: ["run", "-i", "--rm", "-e", "API_KEY", "mcp/server-name"]
-       env: {"API_KEY": "your-api-key"}
+    3. Streamable HTTP server:
+       command: "http://localhost:8000/mcp"
+       server_type: "streamable_http"
+       config: {"timeout": 15.0}
     """
 
-    command: str = Field(description="Command to execute")
-    args: list[str] = Field(description="Arguments passed to command")
+    command: str = Field(description="Command to execute or URL for HTTP servers")
+    server_type: ServerType = Field(default=ServerType.STDIO, description="Type of MCP server")
+    config: dict = Field(default_factory=dict, description="Server configuration")
     enabled: bool = Field(default=True, description="Whether server is enabled")
     env: dict[str, SecretStr] | None = Field(default=None, description="Environment variables")
 
@@ -51,8 +53,9 @@ class MCPServerUpdate(MCPServerBase):
     Schema for updating an existing MCP server
     """
 
-    command: str | None = Field(default=None, description="Command to execute")
-    args: list[str] | None = Field(default=None, description="Arguments passed to command")
+    command: str | None = Field(default=None, description="Command to execute or URL for HTTP servers")
+    server_type: ServerType | None = Field(default=None, description="Type of MCP server")
+    config: dict | None = Field(default=None, description="Server configuration")
     enabled: bool | None = Field(default=None, description="Whether server is enabled")
 
     model_config = ConfigDict(json_encoders={SecretStr: lambda v: v.get_secret_value() if v else None})
