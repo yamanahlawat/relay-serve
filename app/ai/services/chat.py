@@ -24,7 +24,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.providers.factory import ProviderFactory
+from app.ai.schemas.chat import TransparencySettings
 from app.ai.services.stream_block_factory import StreamBlockFactory
+from app.ai.services.tool_tracker import ToolCallTracker
 from app.chat.constants import MessageRole, MessageStatus
 from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate, MessageUsage
 from app.chat.services.message import ChatMessageService
@@ -130,6 +132,7 @@ class ChatService:
         tools: list[Any] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        transparency: TransparencySettings | None = None,
     ) -> AsyncIterator[str]:
         """
         Stream a response for an existing message using pydantic_ai with rich streaming.
@@ -143,6 +146,7 @@ class ChatService:
             tools: Optional tools for the agent
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
+            transparency: Optional transparency settings for controlling stream visibility
 
         Yields:
             JSON-serialized StreamBlock objects containing rich streaming information
@@ -151,6 +155,11 @@ class ChatService:
             ValueError: If message not found or invalid
             RuntimeError: If database or AI operation fails
         """
+        # Initialize transparency settings with defaults
+        transparency = transparency or TransparencySettings()
+
+        # Initialize tool call tracker for managing tool state
+        tool_tracker = ToolCallTracker()
         try:
             # Get the existing message
             existing_message = await self.message_service.get_message(
@@ -192,8 +201,6 @@ class ChatService:
             elif model.default_max_tokens is not None:
                 model_settings_dict["max_tokens"] = model.default_max_tokens
 
-            # Track tool arguments for detailed streaming (no need to track full_response manually)
-            tool_args_accumulator: dict[str, str] = {}  # Track accumulating tool args
             model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
 
             # Use pydantic_ai's rich streaming with message history and current user prompt
@@ -206,69 +213,104 @@ class ChatService:
                     async for node in run:
                         if agent.is_user_prompt_node(node):
                             # User prompt node - show what we're processing
-                            yield StreamBlockFactory.create_thinking_block().model_dump_json()
+                            if transparency.show_thinking:
+                                yield StreamBlockFactory.create_thinking_block(
+                                    "Processing your request..."
+                                ).model_dump_json()
 
                         elif agent.is_model_request_node(node):
                             # Model request node - stream partial request tokens
-                            yield StreamBlockFactory.create_thinking_block().model_dump_json()
+                            if transparency.show_thinking:
+                                yield StreamBlockFactory.create_thinking_block(
+                                    "Generating response..."
+                                ).model_dump_json()
 
                             async with node.stream(run.ctx) as request_stream:
                                 async for event in request_stream:
                                     if isinstance(event, PartStartEvent):
-                                        # Starting a new part (text or tool call)
                                         part_type = type(event.part).__name__
-                                        part_info = ""
 
                                         if part_type == "ToolCallPart":
-                                            part_info = f"tool_name={getattr(event.part, 'tool_name', 'unknown')}, tool_call_id={getattr(event.part, 'tool_call_id', 'unknown')}"
-                                            # Initialize accumulator for this tool call
-                                            tool_call_id = getattr(event.part, "tool_call_id", "unknown")
-                                            tool_args_accumulator[tool_call_id] = ""
-                                        elif part_type == "TextPart":
-                                            part_info = f"content={repr(getattr(event.part, 'content', ''))}"
-                                        else:
-                                            part_info = repr(event.part)
+                                            # Tool call starting - always show basic tool info
+                                            tool_name = getattr(event.part, "tool_name", "unknown")
+                                            tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
 
-                                        yield StreamBlockFactory.create_part_start_block(
-                                            part_index=event.index,
-                                            part_type=part_type,
-                                            part_info=part_info,
-                                        ).model_dump_json()
+                                            # Start tracking this tool call with part index mapping
+                                            tool_tracker.start_tool_call(tool_call_id, tool_name, event.index)
+
+                                            if transparency.show_tool_calls:
+                                                yield StreamBlockFactory.create_tool_start_block(
+                                                    tool_name=tool_name,
+                                                    tool_call_id=tool_call_id,
+                                                ).model_dump_json()
+
+                                            # Always show part start for tool calls (this is what shows the tool name)
+                                            part_info = f"tool_name={tool_name}, tool_call_id={tool_call_id}"
+                                            yield StreamBlockFactory.create_part_start_block(
+                                                part_index=event.index,
+                                                part_type=part_type,
+                                                part_info=part_info,
+                                            ).model_dump_json()
+
+                                        elif part_type == "TextPart":
+                                            if transparency.show_typing_indicators:
+                                                # Text response starting - optional typing indicator
+                                                yield StreamBlockFactory.create_thinking_block(
+                                                    "Typing..."
+                                                ).model_dump_json()
+
+                                            # Show detailed part events only if debugging is enabled
+                                            if transparency.show_part_events:
+                                                part_info = f"content={repr(getattr(event.part, 'content', ''))}"
+                                                yield StreamBlockFactory.create_part_start_block(
+                                                    part_index=event.index,
+                                                    part_type=part_type,
+                                                    part_info=part_info,
+                                                ).model_dump_json()
+
+                                        else:
+                                            # Other part types - only show if debugging is enabled
+                                            if transparency.show_part_events:
+                                                part_info = repr(event.part)
+                                                yield StreamBlockFactory.create_part_start_block(
+                                                    part_index=event.index,
+                                                    part_type=part_type,
+                                                    part_info=part_info,
+                                                ).model_dump_json()
 
                                     elif isinstance(event, PartDeltaEvent):
                                         if isinstance(event.delta, TextPartDelta):
-                                            # Text content delta - stream it for real-time display
+                                            # Text content delta - always stream for real-time display
                                             content = event.delta.content_delta
                                             if content:
                                                 yield StreamBlockFactory.create_text_delta_block(
                                                     content
                                                 ).model_dump_json()
 
-                                        elif isinstance(event.delta, ToolCallPartDelta):
-                                            # Tool call arguments being built - show streaming args
+                                        elif (
+                                            isinstance(event.delta, ToolCallPartDelta) and transparency.show_tool_calls
+                                        ):
+                                            # Tool call arguments being built - show if tool calls enabled
                                             args_delta = event.delta.args_delta
                                             if args_delta:
-                                                # Convert args_delta to string if it's not already
                                                 args_delta_str = (
                                                     str(args_delta) if not isinstance(args_delta, str) else args_delta
                                                 )
 
-                                                # Find the tool call info from the part start event
-                                                tool_call_id = f"part_{event.index}"  # Fallback ID
-                                                tool_name = "unknown"
+                                                # Get the actual tool call ID using part index mapping
+                                                tool_call_id = tool_tracker.get_tool_call_id_by_part_index(event.index)
+                                                if not tool_call_id:
+                                                    # Fallback if mapping fails
+                                                    tool_call_id = f"part_{event.index}"
 
-                                                # Accumulate the args delta
-                                                if tool_call_id not in tool_args_accumulator:
-                                                    tool_args_accumulator[tool_call_id] = ""
-                                                tool_args_accumulator[tool_call_id] += args_delta_str
-
-                                                # Try to parse current accumulated args
-                                                current_args = None
-                                                try:
-                                                    current_args = json.loads(tool_args_accumulator[tool_call_id])
-                                                except (json.JSONDecodeError, ValueError):
-                                                    # Not valid JSON yet, that's fine
-                                                    pass
+                                                # Use tool tracker to accumulate and parse args
+                                                current_args = tool_tracker.accumulate_args(
+                                                    tool_call_id, args_delta_str
+                                                )
+                                                tool_info = tool_tracker.get_tool_info(tool_call_id)
+                                                tool_name = (
+                                                    tool_info.get("tool_name", "unknown") if tool_info else "unknown"
+                                                )
 
                                                 yield StreamBlockFactory.create_tool_args_delta_block(
                                                     tool_name=tool_name,
@@ -279,18 +321,20 @@ class ChatService:
 
                                     elif isinstance(event, FinalResultEvent):
                                         # Final result from model - indicates completion
-                                        yield StreamBlockFactory.create_final_result_event_block(
-                                            tool_name=event.tool_name
-                                        ).model_dump_json()
+                                        if transparency.show_thinking:
+                                            yield StreamBlockFactory.create_final_result_event_block(
+                                                tool_name=event.tool_name
+                                            ).model_dump_json()
 
                         elif agent.is_call_tools_node(node):
-                            # Tool execution node - stream tool calls and results with full detail
-                            yield StreamBlockFactory.create_call_tools_node_start_block().model_dump_json()
+                            # Tool execution node - stream tool calls and results with transparency control
+                            if transparency.show_thinking:
+                                yield StreamBlockFactory.create_call_tools_node_start_block().model_dump_json()
 
                             async with node.stream(ctx=run.ctx) as handle_stream:
                                 async for event in handle_stream:
-                                    if isinstance(event, FunctionToolCallEvent):
-                                        # Tool is being called - show complete call info
+                                    if isinstance(event, FunctionToolCallEvent) and transparency.show_tool_calls:
+                                        # Tool is being called - show complete call info if enabled
                                         tool_args = event.part.args
                                         if isinstance(tool_args, str):
                                             # Try to parse JSON string
@@ -301,14 +345,17 @@ class ChatService:
                                         elif not isinstance(tool_args, dict):
                                             tool_args = {"args": tool_args}
 
+                                        # Mark tool call as completed in tracker
+                                        tool_tracker.complete_tool_call(event.part.tool_call_id)
+
                                         yield StreamBlockFactory.create_function_tool_call_event_block(
                                             tool_name=event.part.tool_name,
                                             tool_call_id=event.part.tool_call_id,
                                             tool_args=tool_args,
                                         ).model_dump_json()
 
-                                    elif isinstance(event, FunctionToolResultEvent):
-                                        # Tool result received - show complete result
+                                    elif isinstance(event, FunctionToolResultEvent) and transparency.show_tool_results:
+                                        # Tool result received - show complete result if enabled
                                         result_content = ""
                                         if hasattr(event.result, "content"):
                                             if isinstance(event.result.content, str):
@@ -320,9 +367,16 @@ class ChatService:
                                         else:
                                             result_content = str(event.result)
 
+                                        # Get tool name from tracker before cleaning up
+                                        tool_info = tool_tracker.get_tool_info(event.tool_call_id)
+                                        tool_name = tool_info.get("tool_name", "unknown") if tool_info else "unknown"
+
+                                        # Clean up tool tracking for completed call
+                                        tool_tracker.cleanup_tool_call(event.tool_call_id)
+
                                         yield StreamBlockFactory.create_function_tool_result_event_block(
                                             tool_call_id=event.tool_call_id,
-                                            tool_name=getattr(event, "tool_name", "unknown"),
+                                            tool_name=tool_name,
                                             result_content=result_content,
                                         ).model_dump_json()
 
@@ -330,6 +384,9 @@ class ChatService:
                             # Agent run complete - will send final message block after streaming
                             if run.result and run.result.output:
                                 assert run.result.output == node.data.output
+
+            # Clean up tool tracker state after streaming completes
+            tool_tracker.reset()
 
             # Save AI response to database after streaming completes using pydantic_ai's final output
             final_output = run.result.output if run.result else None
@@ -374,6 +431,8 @@ class ChatService:
 
         except ValidationError as e:
             logger.error(f"Validation error in stream_response: {e}", exc_info=True)
+            # Clean up tool tracker on error
+            tool_tracker.reset()
             # Update message status to failed
             try:
                 await self.message_service.update_message(
@@ -390,6 +449,8 @@ class ChatService:
             raise ValueError(f"Invalid input data: {e}") from e
         except SQLAlchemyError as e:
             logger.error(f"Database error in stream_response: {e}", exc_info=True)
+            # Clean up tool tracker on error
+            tool_tracker.reset()
             # Update message status to failed
             try:
                 await self.message_service.update_message(
@@ -406,6 +467,8 @@ class ChatService:
             raise RuntimeError(f"Database operation failed: {e}") from e
         except ValueError as e:
             logger.error(f"Value error in stream_response: {e}", exc_info=True)
+            # Clean up tool tracker on error
+            tool_tracker.reset()
             # Update message status to failed
             try:
                 await self.message_service.update_message(
@@ -422,6 +485,8 @@ class ChatService:
             raise
         except Exception as e:
             logger.error(f"Unexpected error streaming response: {e}", exc_info=True)
+            # Clean up tool tracker on error
+            tool_tracker.reset()
             # Update message status to failed
             try:
                 await self.message_service.update_message(
