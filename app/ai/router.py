@@ -6,11 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import StreamingResponse
 
+from app.ai.schemas.chat import CompletionParams
 from app.ai.services import ChatService, SSEConnectionManager, get_sse_manager
 from app.api.schemas.error import ErrorResponseModel
-from app.chat.dependencies.chat import get_chat_service
+from app.ai.dependencies.chat import get_chat_service
 from app.chat.dependencies.session import get_chat_session_service
-from app.chat.schemas.chat import CompletionParams
 from app.chat.services.session import ChatSessionService
 
 router = APIRouter(prefix="/ai", tags=["AI Chat"])
