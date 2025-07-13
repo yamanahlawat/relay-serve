@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
 from typing import Any
 
 from mcp.types import EmbeddedResource, ImageContent, TextContent
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.chat.schemas.message import MessageRead
 from app.core.constants import BaseEnum
@@ -48,6 +49,7 @@ class StreamBlock(BaseModel):
     Base model for different types of stream blocks.
     - For thinking/content blocks: use 'content' field
     - For tool blocks: use tool_* fields
+    - For tool argument streaming: use 'args_delta' field for chunks, 'tool_args' for final args
     - For errors: use error_* fields
     - For completion: use usage field
     """
@@ -63,6 +65,9 @@ class StreamBlock(BaseModel):
     tool_call_id: str | None = None
     tool_result: list[TextContent | ImageContent | EmbeddedResource] | None = None
 
+    # For streaming tool arguments - contains delta chunks as they stream
+    args_delta: str | None = None
+
     # Error handling
     error_type: str | None = None
     error_detail: str | None = None
@@ -72,6 +77,9 @@ class StreamBlock(BaseModel):
 
     # Usage information (for completion blocks)
     usage: dict[str, Any] | None = None
+
+    # Timestamp for tracking when the block was created
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class ToolExecution(BaseModel):
