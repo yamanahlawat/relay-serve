@@ -73,7 +73,7 @@ class StreamBlock(BaseModel):
     error_detail: str | None = None
 
     # Final message
-    message: "MessageRead | None" = None
+    message: MessageRead | None = None
 
     # Usage information (for completion blocks)
     usage: dict[str, Any] | None = None
