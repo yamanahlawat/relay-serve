@@ -1,10 +1,11 @@
 import json
+from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
 
 from loguru import logger
 from pydantic import ValidationError
-from pydantic_ai import Agent
+from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
 from pydantic_ai.messages import (
     FinalResultEvent,
     FunctionToolCallEvent,
@@ -26,10 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.providers.factory import ProviderFactory
 from app.ai.services.stream_block_factory import StreamBlockFactory
 from app.ai.services.tool_tracker import ToolCallTracker
-from app.chat.constants import MessageRole, MessageStatus
+from app.chat.constants import AttachmentType, MessageRole, MessageStatus
+from app.chat.models import ChatMessage
 from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate, MessageUsage
 from app.chat.services.message import ChatMessageService
 from app.chat.services.session import ChatSessionService
+from app.core.config import settings
+from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
 from app.model_context_protocol.services.domain import MCPServerDomainService
@@ -87,10 +91,38 @@ class ChatService:
 
         return self._agents[cache_key]
 
+    async def _convert_attachments_to_pydantic(
+        self, message: ChatMessage
+    ) -> list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None:
+        attachments = message.direct_attachments
+
+        data = []
+        for attachment in attachments:
+            if "localhost" not in str(settings.BASE_URL):
+                attachment_url = get_attachment_download_url(storage_path=attachment.storage_path)
+                if attachment.type == AttachmentType.IMAGE:
+                    data.append(ImageUrl(url=attachment_url))
+                elif attachment.type == AttachmentType.VIDEO:
+                    data.append(VideoUrl(url=attachment.storage_path))
+                elif attachment.type == AttachmentType.AUDIO:
+                    data.append(AudioUrl(url=attachment.storage_path))
+                elif attachment.type == AttachmentType.DOCUMENT:
+                    data.append(DocumentUrl(url=attachment.storage_path))
+                else:
+                    logger.warning(f"Unsupported attachment type for message {message.id}: {attachment.type}")
+            # In case of BASE_URL is localhost, using binary content
+            if attachment.storage_path:
+                file_path = Path(attachment.storage_path)
+                if file_path.exists():
+                    with open(file_path, "rb") as f:
+                        content = f.read()
+                    data.append(BinaryContent(data=content, media_type=attachment.mime_type))
+            return data
+
     async def _prepare_message_history(
         self,
         session_id: UUID,
-        current_message_id: UUID | None = None,
+        current_message: ChatMessage,
     ) -> list[ModelMessage]:
         """
         Prepare message history with recent messages from the session.
@@ -102,7 +134,7 @@ class ChatService:
         try:
             recent_messages = await self.message_service.get_session_context(
                 session_id=session_id,
-                exclude_message_id=current_message_id,
+                exclude_message_id=current_message.id if current_message else None,
             )
 
             # Convert database messages to ModelMessage objects
@@ -165,15 +197,15 @@ class ChatService:
             return block.model_dump_json()
 
         try:
-            # Get the existing message
-            existing_message = await self.message_service.get_message(
+            # Get the current message
+            current_message = await self.message_service.get_message(
                 session_id=session_id,
                 message_id=message_id,
             )
-            if not existing_message or not existing_message.content:
+            if not current_message or not current_message.content:
                 raise ValueError(f"Message {message_id} not found or has no content")
 
-            message_content = existing_message.content
+            message_content = current_message.content
 
             # Update message status to processing
             await self.message_service.update_message(
@@ -191,7 +223,9 @@ class ChatService:
             )
 
             # Prepare message history
-            message_history = await self._prepare_message_history(session_id=session_id, current_message_id=message_id)
+            message_history = await self._prepare_message_history(
+                session_id=session_id, current_message=current_message
+            )
 
             # Prepare model settings
             model_settings_dict = {}
@@ -207,10 +241,13 @@ class ChatService:
 
             model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
 
+            attachment_messages = await self._convert_attachments_to_pydantic(message=current_message)
+            user_prompt = [message_content, *attachment_messages] if attachment_messages else [message_content]
+
             # Use pydantic_ai's rich streaming with message history and current user prompt
             async with agent.run_mcp_servers():
                 async with agent.iter(
-                    user_prompt=message_content,
+                    user_prompt=user_prompt,
                     message_history=message_history,
                     model_settings=model_settings,
                 ) as run:
