@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # Search
     TAVILY_SEARCH_API_KEY: SecretStr | None = None
 
+    # Logfire
+    LOGFIRE_TOKEN: SecretStr | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

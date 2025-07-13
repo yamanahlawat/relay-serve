@@ -4,10 +4,9 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.router import api_router
 from app.ai.services.sse import get_sse_manager
+from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.sentry import init_sentry
 from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 from app.model_context_protocol.services.tool_execution import mcp_tool_service
 
@@ -52,5 +51,17 @@ if settings.ALLOWED_CORS_ORIGINS:
 relay.include_router(router=api_router, prefix=settings.API_URL)
 
 
-# Initialize Sentry
-init_sentry()
+# Initialize Sentry if DSN is provided
+if settings.SENTRY_DSN:
+    from app.core.sentry import init_sentry
+
+    # Initialize Sentry
+    init_sentry()
+
+
+# Configure Logfire if token is provided
+if settings.LOGFIRE_TOKEN:
+    from app.core.logfire import configure_logfire
+
+    # Configure Logfire
+    configure_logfire()

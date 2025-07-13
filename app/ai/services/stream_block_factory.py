@@ -123,17 +123,27 @@ class StreamBlockFactory:
         tool_name: str,
         tool_call_id: str,
         args_delta: str,
-        current_args: dict[str, Any] | None = None,
     ) -> StreamBlock:
         """
-        Create a block for tool arguments delta
+        Create a block for tool arguments delta chunks.
+
+        Streams raw delta chunks in the args_delta field so frontend knows exactly
+        where to look for streaming arguments vs final accumulated arguments.
+
+        Args:
+            tool_name: Name of the tool
+            tool_call_id: Unique identifier for the tool call
+            args_delta: The delta string chunk being streamed
+            current_args: Not used - pydantic-ai handles accumulation
+
+        Returns:
+            StreamBlock with delta chunk in args_delta field
         """
         return StreamBlock(
             type=StreamBlockType.TOOL_CALL,
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            tool_args=current_args,
-            content=f"Tool args delta: {args_delta}",
+            args_delta=args_delta,  # Stream the raw delta chunk here
         )
 
     @staticmethod
@@ -143,7 +153,18 @@ class StreamBlockFactory:
         tool_args: dict[str, Any],
     ) -> StreamBlock:
         """
-        Create a block for function tool call event
+        Create a block for function tool call event with final accumulated arguments.
+
+        This is sent when pydantic-ai has completed accumulating all the argument deltas
+        and is ready to execute the tool with the final arguments.
+
+        Args:
+            tool_name: Name of the tool
+            tool_call_id: Unique identifier for the tool call
+            tool_args: Final accumulated arguments as a dictionary
+
+        Returns:
+            StreamBlock with complete tool_args for the frontend to use
         """
         return StreamBlock(
             type=StreamBlockType.TOOL_CALL,
@@ -175,9 +196,9 @@ class StreamBlockFactory:
         """
         Create a block for final result event
         """
-        content = "Model produced final output"
+        content = "Finalizing response..."
         if tool_name:
-            content += f" (via tool: {tool_name})"
+            content = f"Completing {tool_name} operation..."
 
         return StreamBlock(
             type=StreamBlockType.THINKING,
@@ -191,5 +212,5 @@ class StreamBlockFactory:
         """
         return StreamBlock(
             type=StreamBlockType.THINKING,
-            content="Processing tool calls and responses...",
+            content="Executing tools and gathering information...",
         )
