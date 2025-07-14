@@ -6,6 +6,12 @@ from uuid import UUID
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    FallbackExceptionGroup,
+    ModelRetry,
+    UserError,
+)
 from pydantic_ai.messages import (
     FinalResultEvent,
     FunctionToolCallEvent,
@@ -94,6 +100,13 @@ class ChatService:
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
     ) -> list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None:
+        """
+        Convert message attachments to pydantic_ai compatible formats.
+        Args:
+            message (ChatMessage): The chat message containing attachments.
+        Returns:
+            list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None: A list of pydantic_ai compatible attachment objects or None if no attachments are found.
+        """
         attachments = message.direct_attachments
 
         data = []
@@ -166,7 +179,6 @@ class ChatService:
     ) -> AsyncIterator[str]:
         """
         Stream a response for an existing message using pydantic_ai with Claude-like transparency.
-
         Args:
             provider: LLM provider to use
             model: LLM model to use
@@ -176,10 +188,8 @@ class ChatService:
             tools: Optional tools for the agent
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
-
         Yields:
             JSON-serialized StreamBlock objects containing rich streaming information
-
         Raises:
             ValueError: If message not found or invalid
             RuntimeError: If database or AI operation fails
@@ -450,79 +460,44 @@ class ChatService:
                     },
                 ),
             )
-
-        except ValidationError as e:
-            logger.error(f"Validation error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="ValidationError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise ValueError(f"Invalid input data: {e}") from e
-        except SQLAlchemyError as e:
-            logger.error(f"Database error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="DatabaseError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise RuntimeError(f"Database operation failed: {e}") from e
-        except ValueError as e:
-            logger.error(f"Value error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="ValueError",
-                error_detail=str(e),
-            ).model_dump_json()
+        except ValidationError as error:
+            logger.error(f"Validation error in stream_response: {error}")
+            raise ValueError(f"Invalid input data: {error}") from error
+        except SQLAlchemyError as error:
+            logger.error(f"Database error in stream_response: {error}")
+            raise RuntimeError(f"Database operation failed: {error}") from error
+        except AgentRunError as error:
+            # Catches ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
+            logger.error(f"Agent run error in stream_response: {error}")
             raise
-        except Exception as e:
-            logger.error(f"Unexpected error streaming response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
+        except (UserError, ModelRetry, FallbackExceptionGroup) as error:
+            # Catch the remaining pydantic_ai exceptions
+            logger.error(f"Pydantic AI error in stream_response: {error}")
+            raise
+        finally:
+            # Always clean up tool tracker and update message status on any error
+            if "tool_tracker" in locals():
+                tool_tracker.reset()
+
+            # Update message status to failed if we're in an error state
+            # We can detect this by checking if we're in an exception context
             try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
+                import sys
+
+                exc_info = sys.exc_info()
+                if exc_info[0] is not None:  # We're in an exception context
+                    try:
+                        await self.message_service.update_message(
+                            session_id=session_id,
+                            message_id=message_id,
+                            message_in=MessageUpdate(status=MessageStatus.FAILED),
+                        )
+                    except Exception:
+                        # Ignore database errors during cleanup
+                        pass
             except Exception:
+                # Ignore any errors during cleanup
                 pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="UnexpectedError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise RuntimeError(f"Failed to stream response: {e}") from e
 
     def _calculate_input_cost(self, input_tokens: int, model: LLMModel) -> float:
         """Calculate input cost based on model pricing."""
