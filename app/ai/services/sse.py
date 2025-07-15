@@ -1,3 +1,4 @@
+import json
 from typing import AsyncGenerator
 from uuid import UUID
 
@@ -5,7 +6,6 @@ from fastapi import BackgroundTasks
 from loguru import logger
 from redis.asyncio import Redis
 
-from app.ai.schemas.stream import StreamEvent, StreamResponse
 from app.core.config import settings
 
 
@@ -85,8 +85,11 @@ class SSEConnectionManager:
                 yield f"data: {chunk}\n\n"
 
         except Exception as error:
-            response = StreamResponse(event=StreamEvent.ERROR, error=str(error))
-            yield f"data: {response.model_dump_json()}\n\n"
+            error_message = str(error)
+            logger.error(f"Unexpected stream error for session {session_id}: {error_message}")
+
+            response = {"type": "error", "message": error_message}
+            yield f"data: {json.dumps(response)}\n\n"
 
         finally:
             # Cleanup the session on disconnect
