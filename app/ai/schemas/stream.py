@@ -8,26 +8,6 @@ from app.chat.schemas.message import MessageRead
 from app.core.constants import BaseEnum
 
 
-class StreamEvent(BaseEnum):
-    """
-    Stream event types
-    """
-
-    MESSAGE = "message"  # Content chunk
-    DONE = "done"  # Stream complete
-    ERROR = "error"  # Error occurred
-
-
-class StreamResponse(BaseModel):
-    """
-    Structured stream response
-    """
-
-    event: StreamEvent
-    data: str | None = None
-    error: str | None = None
-
-
 class StreamBlockType(BaseEnum):
     """
     Types of blocks in the message stream

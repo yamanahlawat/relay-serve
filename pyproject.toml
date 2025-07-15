@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.16.4",
     "asyncpg>=0.30.0",
-    "fastapi[standard]>=0.116.0",
+    "fastapi[standard]>=0.116.1",
     "pydantic-settings>=2.10.1",
     "sqlalchemy>=2.0.41",
     "greenlet>=3.2.3",
@@ -29,6 +29,6 @@ dependencies = [
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.2.0",
-    "ruff>=0.12.2",
+    "ruff>=0.12.3",
     "tomli-w>=1.2.0",
 ]

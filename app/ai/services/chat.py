@@ -6,6 +6,12 @@ from uuid import UUID
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    FallbackExceptionGroup,
+    ModelRetry,
+    UserError,
+)
 from pydantic_ai.messages import (
     FinalResultEvent,
     FunctionToolCallEvent,
@@ -17,12 +23,12 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ToolCallPart,
     ToolCallPartDelta,
     UserPromptPart,
 )
 from pydantic_ai.settings import ModelSettings
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.providers.factory import ProviderFactory
 from app.ai.services.stream_block_factory import StreamBlockFactory
@@ -31,8 +37,8 @@ from app.chat.constants import AttachmentType, MessageRole, MessageStatus
 from app.chat.models import ChatMessage
 from app.chat.schemas.message import MessageCreate, MessageRead, MessageUpdate, MessageUsage
 from app.chat.services.message import ChatMessageService
-from app.chat.services.session import ChatSessionService
 from app.core.config import settings
+from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
@@ -42,14 +48,9 @@ from app.model_context_protocol.services.domain import MCPServerDomainService
 class ChatService:
     """Service for handling chat completions with pydantic_ai"""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self) -> None:
         """Initialize the chat service with database session."""
-        self.db = db
         self._agents: dict[str, Agent] = {}
-        self.message_service = ChatMessageService(db=db)
-        self.session_service = ChatSessionService(db=db)
-        # Initialize MCP domain service for server management
-        self.mcp_service = MCPServerDomainService(db=db)
 
     def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
         """Generate a unique key for caching agents."""
@@ -58,9 +59,11 @@ class ChatService:
     async def _get_mcp_servers_for_agent(self) -> list:
         """Get MCP servers for pydantic-ai agent."""
         try:
-            mcp_servers = await self.mcp_service.get_mcp_servers_for_agent()
-            logger.debug(f"Retrieved {len(mcp_servers)} MCP servers for agent")
-            return mcp_servers
+            async with AsyncSessionLocal() as db:
+                mcp_service = MCPServerDomainService(db=db)
+                mcp_servers = await mcp_service.get_mcp_servers_for_agent()
+                logger.debug(f"Retrieved {len(mcp_servers)} MCP servers for agent")
+                return mcp_servers
         except Exception as e:
             logger.warning(f"Failed to get MCP servers: {e}")
             return []
@@ -94,6 +97,13 @@ class ChatService:
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
     ) -> list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None:
+        """
+        Convert message attachments to pydantic_ai compatible formats.
+        Args:
+            message (ChatMessage): The chat message containing attachments.
+        Returns:
+            list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None: A list of pydantic_ai compatible attachment objects or None if no attachments are found.
+        """
         attachments = message.direct_attachments
 
         data = []
@@ -132,19 +142,21 @@ class ChatService:
 
         # Get recent conversation messages for context
         try:
-            recent_messages = await self.message_service.get_session_context(
-                session_id=session_id,
-                exclude_message_id=current_message.id if current_message else None,
-            )
+            async with AsyncSessionLocal() as db:
+                message_service = ChatMessageService(db=db)
+                recent_messages = await message_service.get_session_context(
+                    session_id=session_id,
+                    exclude_message_id=current_message.id if current_message else None,
+                )
 
-            # Convert database messages to ModelMessage objects
-            if recent_messages:
-                for msg in recent_messages:
-                    content = msg.content or ""
-                    if msg.role == MessageRole.USER.value:
-                        message_history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
-                    elif msg.role == MessageRole.ASSISTANT.value:
-                        message_history.append(ModelResponse(parts=[TextPart(content=content)]))
+                # Convert database messages to ModelMessage objects
+                if recent_messages:
+                    for msg in recent_messages:
+                        content = msg.content or ""
+                        if msg.role == MessageRole.USER.value:
+                            message_history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+                        elif msg.role == MessageRole.ASSISTANT.value:
+                            message_history.append(ModelResponse(parts=[TextPart(content=content)]))
 
         except SQLAlchemyError as e:
             logger.warning(f"Database error retrieving message history: {e}")
@@ -166,7 +178,6 @@ class ChatService:
     ) -> AsyncIterator[str]:
         """
         Stream a response for an existing message using pydantic_ai with Claude-like transparency.
-
         Args:
             provider: LLM provider to use
             model: LLM model to use
@@ -176,10 +187,8 @@ class ChatService:
             tools: Optional tools for the agent
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
-
         Yields:
             JSON-serialized StreamBlock objects containing rich streaming information
-
         Raises:
             ValueError: If message not found or invalid
             RuntimeError: If database or AI operation fails
@@ -197,22 +206,24 @@ class ChatService:
             return block.model_dump_json()
 
         try:
-            # Get the current message
-            current_message = await self.message_service.get_message(
-                session_id=session_id,
-                message_id=message_id,
-            )
-            if not current_message or not current_message.content:
-                raise ValueError(f"Message {message_id} not found or has no content")
+            async with AsyncSessionLocal() as db:
+                message_service = ChatMessageService(db=db)
+                # Get the current message
+                current_message = await message_service.get_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                )
+                if not current_message or not current_message.content:
+                    raise ValueError(f"Message {message_id} not found or has no content")
 
-            message_content = current_message.content
+                message_content = current_message.content
 
-            # Update message status to processing
-            await self.message_service.update_message(
-                session_id=session_id,
-                message_id=message_id,
-                message_in=MessageUpdate(status=MessageStatus.PROCESSING),
-            )
+                # Update message status to processing
+                await message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=MessageUpdate(status=MessageStatus.PROCESSING),
+                )
 
             # Get or create agent
             agent = await self._get_or_create_agent(
@@ -265,9 +276,7 @@ class ChatService:
                             async with node.stream(run.ctx) as request_stream:
                                 async for event in request_stream:
                                     if isinstance(event, PartStartEvent):
-                                        part_type = type(event.part).__name__
-
-                                        if part_type == "ToolCallPart":
+                                        if isinstance(event.part, ToolCallPart):
                                             # Tool call starting - show thinking and tool info
                                             tool_name = getattr(event.part, "tool_name", "unknown")
                                             tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
@@ -288,9 +297,13 @@ class ChatService:
                                             )
                                             yield collect_and_yield_block(tool_start_block)
 
-                                        elif part_type == "TextPart":
-                                            # Text response starting - no special handling needed
-                                            pass
+                                        elif isinstance(event.part, TextPart):
+                                            # Text response starting - yield the initial content
+                                            text_content = getattr(event.part, "content", "")
+                                            if text_content:
+                                                yield StreamBlockFactory.create_text_delta_block(
+                                                    text_content
+                                                ).model_dump_json()
 
                                     elif isinstance(event, PartDeltaEvent):
                                         if isinstance(event.delta, TextPartDelta):
@@ -428,10 +441,12 @@ class ChatService:
                     )
 
                 # Save the complete message to database for persistence
-                created_message = await self.message_service.create_message(
-                    message_in=assistant_message,
-                    session_id=session_id,
-                )
+                async with AsyncSessionLocal() as db:
+                    message_service = ChatMessageService(db=db)
+                    created_message = await message_service.create_message(
+                        message_in=assistant_message,
+                        session_id=session_id,
+                    )
 
                 # Send final message block with the persisted message data and usage
                 final_block = StreamBlockFactory.create_done_block(content=final_output)
@@ -440,89 +455,58 @@ class ChatService:
                 yield final_block.model_dump_json()
 
             # Update original message status to completed
-            await self.message_service.update_message(
-                session_id=session_id,
-                message_id=message_id,
-                message_in=MessageUpdate(
-                    status=MessageStatus.COMPLETED,
-                    extra_data={
-                        "processing_complete": True,
-                    },
-                ),
-            )
-
-        except ValidationError as e:
-            logger.error(f"Validation error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
+            async with AsyncSessionLocal() as db:
+                message_service = ChatMessageService(db=db)
+                await message_service.update_message(
                     session_id=session_id,
                     message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
+                    message_in=MessageUpdate(
+                        status=MessageStatus.COMPLETED,
+                        extra_data={
+                            "processing_complete": True,
+                        },
+                    ),
                 )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="ValidationError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise ValueError(f"Invalid input data: {e}") from e
-        except SQLAlchemyError as e:
-            logger.error(f"Database error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="DatabaseError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise RuntimeError(f"Database operation failed: {e}") from e
-        except ValueError as e:
-            logger.error(f"Value error in stream_response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
-            try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
-            except Exception:
-                pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="ValueError",
-                error_detail=str(e),
-            ).model_dump_json()
+        except ValidationError as error:
+            logger.error(f"Validation error in stream_response: {error}")
+            raise ValueError(f"Invalid input data: {error}") from error
+        except SQLAlchemyError as error:
+            logger.error(f"Database error in stream_response: {error}")
+            raise RuntimeError(f"Database operation failed: {error}") from error
+        except AgentRunError as error:
+            # Catches ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
+            logger.error(f"Agent run error in stream_response: {error}")
             raise
-        except Exception as e:
-            logger.error(f"Unexpected error streaming response: {e}", exc_info=True)
-            # Clean up tool tracker on error
-            tool_tracker.reset()
-            # Update message status to failed
+        except (UserError, ModelRetry, FallbackExceptionGroup) as error:
+            # Catch the remaining pydantic_ai exceptions
+            logger.error(f"Pydantic AI error in stream_response: {error}")
+            raise
+        finally:
+            # Always clean up tool tracker and update message status on any error
+            if "tool_tracker" in locals():
+                tool_tracker.reset()
+
+            # Update message status to failed if we're in an error state
+            # We can detect this by checking if we're in an exception context
             try:
-                await self.message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.FAILED),
-                )
+                import sys
+
+                exc_info = sys.exc_info()
+                if exc_info[0] is not None:  # We're in an exception context
+                    try:
+                        async with AsyncSessionLocal() as db:
+                            message_service = ChatMessageService(db=db)
+                            await message_service.update_message(
+                                session_id=session_id,
+                                message_id=message_id,
+                                message_in=MessageUpdate(status=MessageStatus.FAILED),
+                            )
+                    except Exception:
+                        # Ignore database errors during cleanup
+                        pass
             except Exception:
+                # Ignore any errors during cleanup
                 pass
-            yield StreamBlockFactory.create_error_block(
-                error_type="UnexpectedError",
-                error_detail=str(e),
-            ).model_dump_json()
-            raise RuntimeError(f"Failed to stream response: {e}") from e
 
     def _calculate_input_cost(self, input_tokens: int, model: LLMModel) -> float:
         """Calculate input cost based on model pricing."""
@@ -546,12 +530,10 @@ class ChatService:
         return 0.0
 
 
-def create_chat_service(db: AsyncSession) -> ChatService:
+def create_chat_service() -> ChatService:
     """
     Factory function to create a ChatService instance with a database session.
-    Args:
-        db: Database session
     Returns:
         ChatService instance
     """
-    return ChatService(db=db)
+    return ChatService()
