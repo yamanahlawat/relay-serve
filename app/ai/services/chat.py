@@ -517,10 +517,11 @@ class ChatService:
         """
         model_capability = self.model_registry.get_model(model_id=model.name)
         if not model_capability or not model_capability.token_costs:
+            logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
         costs = model_capability.token_costs
-        input_cost = (input_tokens / 1_000_000) * (costs.input_cost if costs else 0.0)
-        output_cost = (output_tokens / 1_000_000) * (costs.output_cost if costs else 0.0)
+        input_cost = (input_tokens / 1_000_000) * costs.input_cost
+        output_cost = (output_tokens / 1_000_000) * costs.output_cost
         total_cost = input_cost + output_cost
         return {"input_cost": input_cost, "output_cost": output_cost, "total_cost": total_cost}
 
