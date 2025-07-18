@@ -89,7 +89,7 @@ class MCPServerDomainService:
             if not is_valid:
                 raise MCPServerError(f"Server validation failed: {error_msg}")
 
-            logger.info(f"Successfully validated server '{server_data.name}' (fast validation)")
+            logger.info(f"Successfully validated server '{server_data.name}'")
 
         # Create server in database (only if validation passed)
         db_server = await crud_mcp_server.create(db=self.db, obj_in=server_data)
