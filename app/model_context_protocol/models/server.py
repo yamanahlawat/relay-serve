@@ -18,8 +18,7 @@ class MCPServer(TimeStampedBase):
 
     Supports multiple server types:
     - stdio: Traditional process-based servers
-    - sse: HTTP with Server-Sent Events
-    - streamable_http: HTTP with Streamable transport
+    - streamable_http: HTTP with Streamable transport (modern, recommended)
     """
 
     __tablename__ = "mcp_servers"
@@ -38,7 +37,7 @@ class MCPServer(TimeStampedBase):
 
     # Server configuration (flexible JSON structure)
     # For stdio: {"args": [...], "cwd": "...", "timeout": 5.0, "tool_prefix": "..."}
-    # For sse/http: {"timeout": 5.0, "tool_prefix": "...", "headers": {...}}
+    # For streamable_http: {"timeout": 5.0, "tool_prefix": "...", "headers": {...}}
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Server status

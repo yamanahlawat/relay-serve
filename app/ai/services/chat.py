@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
 
+from llm_registry import CapabilityRegistry
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
@@ -46,11 +47,22 @@ from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
 class ChatService:
-    """Service for handling chat completions with pydantic_ai"""
+    """
+    Service for handling chat completions with pydantic_ai
+    """
+
+    # Attachment type mapping for cleaner code
+    _ATTACHMENT_TYPE_MAP = {
+        AttachmentType.IMAGE: ImageUrl,
+        AttachmentType.VIDEO: VideoUrl,
+        AttachmentType.AUDIO: AudioUrl,
+        AttachmentType.DOCUMENT: DocumentUrl,
+    }
 
     def __init__(self) -> None:
         """Initialize the chat service with database session."""
         self._agents: dict[str, Agent] = {}
+        self.model_registry = CapabilityRegistry()
 
     def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
         """Generate a unique key for caching agents."""
@@ -99,48 +111,47 @@ class ChatService:
     ) -> list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None:
         """
         Convert message attachments to pydantic_ai compatible formats.
-        Args:
-            message (ChatMessage): The chat message containing attachments.
-        Returns:
-            list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None: A list of pydantic_ai compatible attachment objects or None if no attachments are found.
         """
-        attachments = message.direct_attachments
+        if not message.direct_attachments:
+            return None
 
         data = []
-        for attachment in attachments:
-            if "localhost" not in str(settings.BASE_URL):
-                attachment_url = get_attachment_download_url(storage_path=attachment.storage_path)
-                if attachment.type == AttachmentType.IMAGE:
-                    data.append(ImageUrl(url=attachment_url))
-                elif attachment.type == AttachmentType.VIDEO:
-                    data.append(VideoUrl(url=attachment.storage_path))
-                elif attachment.type == AttachmentType.AUDIO:
-                    data.append(AudioUrl(url=attachment.storage_path))
-                elif attachment.type == AttachmentType.DOCUMENT:
-                    data.append(DocumentUrl(url=attachment.storage_path))
-                else:
-                    logger.warning(f"Unsupported attachment type for message {message.id}: {attachment.type}")
-            # In case of BASE_URL is localhost, using binary content
-            if attachment.storage_path:
+        is_localhost = "localhost" in str(settings.BASE_URL)
+
+        for attachment in message.direct_attachments:
+            if not attachment.storage_path:
+                continue
+
+            # Handle localhost case with binary content
+            if is_localhost:
                 file_path = Path(attachment.storage_path)
                 if file_path.exists():
                     with open(file_path, "rb") as f:
                         content = f.read()
                     data.append(BinaryContent(data=content, media_type=attachment.mime_type))
-            return data
+                continue
 
-    async def _prepare_message_history(
-        self,
-        session_id: UUID,
-        current_message: ChatMessage,
-    ) -> list[ModelMessage]:
+            # Handle remote URLs
+            attachment_url = get_attachment_download_url(storage_path=attachment.storage_path)
+            attachment_class = self._ATTACHMENT_TYPE_MAP.get(attachment.type)
+
+            if attachment_class:
+                # Use storage_path for VIDEO/AUDIO, attachment_url for IMAGE/DOCUMENT
+                url = (
+                    attachment.storage_path
+                    if attachment.type in (AttachmentType.VIDEO, AttachmentType.AUDIO)
+                    else attachment_url
+                )
+                data.append(attachment_class(url=url))
+            else:
+                logger.warning(f"Unsupported attachment type for message {message.id}: {attachment.type}")
+
+        return data if data else None
+
+    async def _prepare_message_history(self, session_id: UUID, current_message: ChatMessage) -> list[ModelMessage]:
         """
         Prepare message history with recent messages from the session.
-        Returns a list of ModelMessage objects for pydantic_ai.
         """
-        message_history: list[ModelMessage] = []
-
-        # Get recent conversation messages for context
         try:
             async with AsyncSessionLocal() as db:
                 message_service = ChatMessageService(db=db)
@@ -150,20 +161,62 @@ class ChatService:
                 )
 
                 # Convert database messages to ModelMessage objects
-                if recent_messages:
-                    for msg in recent_messages:
-                        content = msg.content or ""
-                        if msg.role == MessageRole.USER.value:
-                            message_history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
-                        elif msg.role == MessageRole.ASSISTANT.value:
-                            message_history.append(ModelResponse(parts=[TextPart(content=content)]))
+                message_history = []
+                for msg in recent_messages or []:
+                    content = msg.content or ""
+                    if msg.role == MessageRole.USER.value:
+                        message_history.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+                    elif msg.role == MessageRole.ASSISTANT.value:
+                        message_history.append(ModelResponse(parts=[TextPart(content=content)]))
 
-        except SQLAlchemyError as e:
-            logger.warning(f"Database error retrieving message history: {e}")
-        except (AttributeError, TypeError) as e:
-            logger.warning(f"Data formatting error in message history: {e}")
+                return message_history
 
-        return message_history
+        except (SQLAlchemyError, AttributeError, TypeError) as e:
+            logger.warning(f"Error retrieving message history: {e}")
+            return []
+
+    def _prepare_model_settings(
+        self, model: LLMModel, temperature: float | None, max_tokens: int | None
+    ) -> ModelSettings | None:
+        """
+        Prepare model settings from parameters and defaults.
+        """
+        settings_dict = {}
+
+        # Set temperature
+        if temperature is not None:
+            settings_dict["temperature"] = temperature
+        elif model.default_temperature is not None:
+            settings_dict["temperature"] = model.default_temperature
+
+        # Set max tokens
+        if max_tokens is not None:
+            settings_dict["max_tokens"] = max_tokens
+        elif model.default_max_tokens is not None:
+            settings_dict["max_tokens"] = model.default_max_tokens
+
+        return ModelSettings(**settings_dict) if settings_dict else None
+
+    async def _update_message_status(
+        self, session_id: UUID, message_id: UUID, status: MessageStatus, extra_data: dict | None = None
+    ) -> None:
+        """
+        Update message status in database.
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                message_service = ChatMessageService(db=db)
+                update_data = MessageUpdate(status=status)
+                if extra_data:
+                    update_data.extra_data = extra_data
+                await message_service.update_message(
+                    session_id=session_id,
+                    message_id=message_id,
+                    message_in=update_data,
+                )
+        except Exception:
+            # Ignore database errors during status updates
+            pass
 
     async def stream_response(
         self,
@@ -209,51 +262,26 @@ class ChatService:
             async with AsyncSessionLocal() as db:
                 message_service = ChatMessageService(db=db)
                 # Get the current message
-                current_message = await message_service.get_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                )
+                current_message = await message_service.get_message(session_id=session_id, message_id=message_id)
                 if not current_message or not current_message.content:
                     raise ValueError(f"Message {message_id} not found or has no content")
 
-                message_content = current_message.content
-
-                # Update message status to processing
-                await message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(status=MessageStatus.PROCESSING),
-                )
+            # Update message status to processing
+            await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
 
             # Get or create agent
-            agent = await self._get_or_create_agent(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                tools=tools,
-            )
+            agent = await self._get_or_create_agent(provider, model, system_prompt, tools)
 
-            # Prepare message history
-            message_history = await self._prepare_message_history(
-                session_id=session_id, current_message=current_message
-            )
+            # Prepare message history and model settings
+            message_history = await self._prepare_message_history(session_id, current_message)
+            model_settings = self._prepare_model_settings(model, temperature, max_tokens)
 
-            # Prepare model settings
-            model_settings_dict = {}
-            if temperature is not None:
-                model_settings_dict["temperature"] = temperature
-            elif model.default_temperature is not None:
-                model_settings_dict["temperature"] = model.default_temperature
-
-            if max_tokens is not None:
-                model_settings_dict["max_tokens"] = max_tokens
-            elif model.default_max_tokens is not None:
-                model_settings_dict["max_tokens"] = model.default_max_tokens
-
-            model_settings = ModelSettings(**model_settings_dict) if model_settings_dict else None
-
-            attachment_messages = await self._convert_attachments_to_pydantic(message=current_message)
-            user_prompt = [message_content, *attachment_messages] if attachment_messages else [message_content]
+            # Prepare user prompt with attachments
+            attachment_messages = await self._convert_attachments_to_pydantic(current_message)
+            if attachment_messages:
+                user_prompt = [current_message.content, *attachment_messages]
+            else:
+                user_prompt = [current_message.content]
 
             # Use pydantic_ai's rich streaming with message history and current user prompt
             async with agent.run_mcp_servers():
@@ -433,11 +461,16 @@ class ChatService:
 
                 # Add usage data if available
                 if usage_data:
+                    costs = self._calculate_cost(
+                        model=model,
+                        input_tokens=getattr(usage_data, "request_tokens", 0),
+                        output_tokens=getattr(usage_data, "response_tokens", 0),
+                    )
                     assistant_message.usage = MessageUsage(
                         input_tokens=getattr(usage_data, "request_tokens", 0),
                         output_tokens=getattr(usage_data, "response_tokens", 0),
-                        input_cost=self._calculate_input_cost(getattr(usage_data, "request_tokens", 0), model),
-                        output_cost=self._calculate_output_cost(getattr(usage_data, "response_tokens", 0), model),
+                        input_cost=costs["input_cost"],
+                        output_cost=costs["output_cost"],
                     )
 
                 # Save the complete message to database for persistence
@@ -455,79 +488,42 @@ class ChatService:
                 yield final_block.model_dump_json()
 
             # Update original message status to completed
-            async with AsyncSessionLocal() as db:
-                message_service = ChatMessageService(db=db)
-                await message_service.update_message(
-                    session_id=session_id,
-                    message_id=message_id,
-                    message_in=MessageUpdate(
-                        status=MessageStatus.COMPLETED,
-                        extra_data={
-                            "processing_complete": True,
-                        },
-                    ),
-                )
+            await self._update_message_status(
+                session_id, message_id, MessageStatus.COMPLETED, {"processing_complete": True}
+            )
         except ValidationError as error:
             logger.error(f"Validation error in stream_response: {error}")
             raise ValueError(f"Invalid input data: {error}") from error
         except SQLAlchemyError as error:
             logger.error(f"Database error in stream_response: {error}")
             raise RuntimeError(f"Database operation failed: {error}") from error
-        except AgentRunError as error:
-            # Catches ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
-            logger.error(f"Agent run error in stream_response: {error}")
-            raise
-        except (UserError, ModelRetry, FallbackExceptionGroup) as error:
-            # Catch the remaining pydantic_ai exceptions
-            logger.error(f"Pydantic AI error in stream_response: {error}")
+        except (AgentRunError, UserError, ModelRetry, FallbackExceptionGroup) as error:
+            logger.error(f"AI error in stream_response: {error}")
             raise
         finally:
-            # Always clean up tool tracker and update message status on any error
+            # Clean up tool tracker and update message status on error
             if "tool_tracker" in locals():
                 tool_tracker.reset()
 
-            # Update message status to failed if we're in an error state
-            # We can detect this by checking if we're in an exception context
-            try:
-                import sys
+            # Update message status to failed if we're in an exception context
+            import sys
 
-                exc_info = sys.exc_info()
-                if exc_info[0] is not None:  # We're in an exception context
-                    try:
-                        async with AsyncSessionLocal() as db:
-                            message_service = ChatMessageService(db=db)
-                            await message_service.update_message(
-                                session_id=session_id,
-                                message_id=message_id,
-                                message_in=MessageUpdate(status=MessageStatus.FAILED),
-                            )
-                    except Exception:
-                        # Ignore database errors during cleanup
-                        pass
-            except Exception:
-                # Ignore any errors during cleanup
-                pass
+            if sys.exc_info()[0] is not None:
+                await self._update_message_status(session_id, message_id, MessageStatus.FAILED)
 
-    def _calculate_input_cost(self, input_tokens: int, model: LLMModel) -> float:
-        """Calculate input cost based on model pricing."""
-        # For now, return 0.0 since the model doesn't have cost fields
-        # In the future, add cost fields to LLMModel or use a pricing service
-        # TODO: Implement proper cost calculation based on model pricing
-        return 0.0
-
-    def _calculate_output_cost(self, output_tokens: int, model: LLMModel) -> float:
-        """Calculate output cost based on model pricing."""
-        # For now, return 0.0 since the model doesn't have cost fields
-        # In the future, add cost fields to LLMModel or use a pricing service
-        # TODO: Implement proper cost calculation based on model pricing
-        return 0.0
-
-    def _calculate_total_cost(self, usage_data: Any, model: LLMModel) -> float:
-        """Calculate total cost from usage data."""
-        # For now, return 0.0 since the model doesn't have cost fields
-        # In the future, implement proper cost calculation
-        # TODO: Implement proper cost calculation based on usage data
-        return 0.0
+    def _calculate_cost(self, model: LLMModel, input_tokens: int, output_tokens: int) -> dict[str, float]:
+        """
+        Calculate input, output, and total costs based on model pricing.
+        """
+        model_capability = self.model_registry.get_model(model_id=model.name)
+        if not model_capability or not model_capability.token_costs:
+            logger.warning(f"Model {model.name} does not have token costs defined")
+            return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+        costs = model_capability.token_costs
+        input_cost = (input_tokens / 1_000_000) * costs.input_cost
+        output_cost = (output_tokens / 1_000_000) * costs.output_cost
+        total_cost = input_cost + output_cost
+        return {"input_cost": input_cost, "output_cost": output_cost, "total_cost": total_cost}
 
 
 def create_chat_service() -> ChatService:

@@ -1,24 +1,21 @@
+from typing import Any
 from uuid import UUID
 
 from loguru import logger
-from pydantic_ai.mcp import MCPServerSSE, MCPServerStdio, MCPServerStreamableHTTP
+from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model_context_protocol.constants import ServerType
 from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.exceptions import MCPServerError
-from app.model_context_protocol.schemas.config import (
-    HTTPServerConfig,
-    StdioServerConfig,
-)
 from app.model_context_protocol.schemas.servers import (
+    MCPServerBase,
     MCPServerCreate,
     MCPServerResponse,
     MCPServerUpdate,
     ServerStatus,
 )
-from app.model_context_protocol.schemas.tools import MCPTool
-from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
+from app.model_context_protocol.services.validator import MCPServerValidator
 
 
 class MCPServerDomainService:
@@ -26,22 +23,21 @@ class MCPServerDomainService:
     Domain service for MCP server operations.
 
     This service handles domain operations and business logic for MCP servers,
-    focusing on database interactions and API-level operations. It uses the
-    MCPServerLifecycleManager for runtime operations.
+    focusing on database interactions and API-level operations.
     """
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.lifecycle_manager = mcp_lifecycle_manager
+        self.validator = MCPServerValidator()
 
     async def list_servers(self, offset: int = 0, limit: int = 10) -> list[MCPServerResponse]:
         """
-        List all configured MCP servers with their status and available tools.
+        List all configured MCP servers with their status.
         Args:
             offset: Number of items to skip
             limit: Maximum number of items to return
         Returns:
-            List of all server responses with status and tools
+            List of all server responses with status (no tools - lazy loaded)
         """
         # Get all servers from DB
         servers = await crud_mcp_server.filter(
@@ -50,40 +46,15 @@ class MCPServerDomainService:
             limit=limit,
         )
 
-        # Get running servers to determine status
-        running_servers = await self.lifecycle_manager.get_running_servers()
-
         response = []
         for server in servers:
-            # Get available tools for running server
-            available_tools = []
-            status = ServerStatus.STOPPED
+            # Simple status determination based on configuration
+            status = ServerStatus.DISABLED if not server.enabled else ServerStatus.RUNNING
 
-            # Check if server is running and get tools if it is
-            if server.name in running_servers:
-                status = ServerStatus.RUNNING
-                session = running_servers[server.name]
-                try:
-                    tools_response = await session.list_tools()
-                    available_tools = [
-                        MCPTool(
-                            name=tool.name,
-                            description=tool.description,
-                            server_name=server.name,
-                            input_schema=tool.inputSchema,
-                        )
-                        for tool in tools_response.tools
-                    ]
-                except Exception:
-                    pass  # Ignore errors when fetching tools
-            elif not server.enabled:
-                status = ServerStatus.DISABLED
-
-            # Create server response object
+            # Create server response object without tools (lazy loaded)
             server_response = MCPServerResponse(
                 **server.__dict__,
                 status=status,
-                available_tools=available_tools,
             )
             response.append(server_response)
 
@@ -92,72 +63,62 @@ class MCPServerDomainService:
     async def create_server(self, server_data: MCPServerCreate) -> MCPServerResponse:
         """
         Create a new MCP server configuration.
-        This method creates a new server configuration in the database
-        and starts the server if it's enabled.
+        This method creates a new server configuration in the database and validates it.
+        If validation fails, the server creation is rejected.
         Args:
             server_data: Server configuration data
         Returns:
-            Created server with status
+            Created server with status (no tools - lazy loaded)
+        Raises:
+            MCPServerError: If server validation fails
         """
-        # Create server in database
+        # Validate server configuration before creating
+        if server_data.enabled:
+            # Convert to schema for validation
+            server_config = MCPServerBase(
+                command=server_data.command,
+                server_type=server_data.server_type,
+                config=server_data.config,
+                enabled=server_data.enabled,
+                env=server_data.env,
+            )
+
+            # Validate server configuration
+            is_valid, error_msg = await self.validator.validate_server(server_data.name, server_config)
+
+            if not is_valid:
+                raise MCPServerError(f"Server validation failed: {error_msg}")
+
+            logger.info(f"Successfully validated server '{server_data.name}'")
+
+        # Create server in database (only if validation passed)
         db_server = await crud_mcp_server.create(db=self.db, obj_in=server_data)
 
-        # Determine server status
-        status = ServerStatus.STOPPED
-        available_tools = []
+        # Determine status based on enabled flag
+        status = ServerStatus.DISABLED if not db_server.enabled else ServerStatus.RUNNING
 
-        # Start server if enabled
-        if db_server.enabled:
-            try:
-                # Create server config
-                config = await self.lifecycle_manager.get_server_config(self.db, db_server.name)
-                if config:
-                    # Start server
-                    session = await self.lifecycle_manager.process_manager.start_server(
-                        server_name=db_server.name, config=config
-                    )
-                    status = ServerStatus.RUNNING
-
-                    # Get available tools
-                    try:
-                        tools_response = await session.list_tools()
-                        available_tools = [
-                            MCPTool(
-                                name=tool.name,
-                                description=tool.description,
-                                server_name=db_server.name,
-                                input_schema=tool.inputSchema,
-                            )
-                            for tool in tools_response.tools
-                        ]
-                    except Exception:
-                        pass  # Ignore errors when fetching tools
-            except Exception:
-                status = ServerStatus.ERROR
-
-        # Create response
+        # Create response without tools (lazy loaded)
         return MCPServerResponse(
             **db_server.__dict__,
             status=status,
-            available_tools=available_tools,
         )
 
     async def update_server(self, server_id: UUID, update_data: MCPServerUpdate) -> MCPServerResponse:
         """
         Update an existing MCP server configuration.
 
-        This method updates an existing server configuration in the database
-        and manages its runtime state based on the updated configuration.
+        This method updates an existing server configuration in the database and validates it.
+        If validation fails, the server update is rejected.
 
         Args:
             server_id: UUID of the server to update
             update_data: Server configuration update data
 
         Returns:
-            MCPServerResponse with updated server data and status
+            MCPServerResponse with updated server data and status (no tools - lazy loaded)
 
         Raises:
-            MCPServerError: If the server is not found
+            MCPServerError: If the server is not found or validation fails
         """
         # Get the server from database
         existing = await crud_mcp_server.get(db=self.db, id=server_id)
@@ -170,72 +131,39 @@ class MCPServerDomainService:
         if not updated:
             raise MCPServerError(f"Server with ID {server_id} not found")
 
-        # Get running servers to determine status
-        running_servers = await self.lifecycle_manager.get_running_servers()
-        status = ServerStatus.UNKNOWN
-        available_tools = []
-
-        # Manage server runtime state based on updated configuration
+        # Validate updated server configuration if enabled
         if updated.enabled:
-            # Server should be running
-            restart_needed = False
+            # Convert database model to schema for validation
+            server_config = MCPServerBase(
+                command=updated.command,
+                server_type=updated.server_type,
+                config=updated.config,
+                enabled=updated.enabled,
+                env=updated.env,
+            )
 
-            # Check if server is already running
-            if updated.name in running_servers:
-                # Server is already running, but config may have changed
-                # Restart the server to apply new configuration
-                await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
-                restart_needed = True
-            else:
-                # Server is not running, needs to be started
-                restart_needed = True
+            # Validate server configuration
+            is_valid, error_msg = await self.validator.validate_server(updated.name, server_config)
 
-            # Start server if needed
-            if restart_needed:
-                try:
-                    config = await self.lifecycle_manager.get_server_config(self.db, updated.name)
-                    if config:
-                        session = await self.lifecycle_manager.process_manager.start_server(
-                            server_name=updated.name, config=config
-                        )
-                        status = ServerStatus.RUNNING
+            if not is_valid:
+                # Revert the update by setting enabled=False
+                revert_data = MCPServerUpdate(enabled=False)
+                await crud_mcp_server.update(db=self.db, id=server_id, obj_in=revert_data)
+                raise MCPServerError(f"Server validation failed: {error_msg}")
 
-                        # Get available tools
-                        try:
-                            tools_response = await session.list_tools()
-                            available_tools = [
-                                MCPTool(
-                                    name=tool.name,
-                                    description=tool.description,
-                                    server_name=updated.name,
-                                    input_schema=tool.inputSchema,
-                                )
-                                for tool in tools_response.tools
-                            ]
-                        except Exception:
-                            pass  # Ignore errors when fetching tools
-                    else:
-                        status = ServerStatus.ERROR
-                except Exception:
-                    status = ServerStatus.ERROR
-        else:
-            # Server should be stopped
-            if updated.name in running_servers:
-                await self.lifecycle_manager.process_manager.shutdown_server(updated.name)
-            status = ServerStatus.STOPPED
+        # Determine status based on enabled flag
+        status = ServerStatus.DISABLED if not updated.enabled else ServerStatus.RUNNING
 
-        # Always return MCPServerResponse
+        # Return MCPServerResponse without tools (lazy loaded)
         return MCPServerResponse(
             **updated.__dict__,
             status=status,
-            available_tools=available_tools,
         )
 
     async def delete_server(self, server_id: UUID) -> None:
         """
         Delete an existing MCP server configuration.
-        This method deletes an existing server configuration from the database
-        and shuts down the server if it's running.
+        This method deletes an existing server configuration from the database.
         Args:
             server_id: UUID of the server to delete
         Raises:
@@ -246,13 +174,45 @@ class MCPServerDomainService:
         if not existing:
             raise MCPServerError("Server not found")
 
-        # Shutdown server if running
-        running_servers = await self.lifecycle_manager.get_running_servers()
-        if existing.name in running_servers:
-            await self.lifecycle_manager.process_manager.shutdown_server(existing.name)
-
         # Delete the server from database
         await crud_mcp_server.delete(db=self.db, id=server_id)
+
+    async def validate_server_with_tools(self, server_id: UUID) -> dict[str, Any]:
+        """
+        Validate a server and get its tools.
+
+        Args:
+            server_id: UUID of the server to validate
+
+        Returns:
+            Dictionary with validation results including tools list
+
+        Raises:
+            MCPServerError: If the server is not found
+        """
+        # Get the server from database
+        db_server = await crud_mcp_server.get(db=self.db, id=server_id)
+        if not db_server:
+            raise MCPServerError("Server not found")
+
+        # Convert database model to schema for validation
+        server_config = MCPServerBase(
+            command=db_server.command,
+            server_type=db_server.server_type,
+            config=db_server.config,
+            enabled=db_server.enabled,
+            env=db_server.env,
+        )
+
+        # Validate server - this will check connectivity and list tools
+        is_valid, error_msg = await self.validator.validate_server(db_server.name, server_config)
+
+        return {
+            "server_id": server_id,
+            "server_name": db_server.name,
+            "is_valid": is_valid,
+            "error_message": error_msg,
+        }
 
     async def get_mcp_servers_for_agent(self) -> list:
         """
@@ -290,16 +250,6 @@ class MCPServerDomainService:
                             cwd=config.get("cwd"),
                         )
 
-                    elif server_type == ServerType.SSE:
-                        # For SSE servers, command field contains the URL
-                        config = getattr(db_server, "config", {}) or {}
-
-                        mcp_server = MCPServerSSE(
-                            url=db_server.command,  # URL is stored in command field
-                            tool_prefix=config.get("tool_prefix"),
-                            timeout=config.get("timeout", 5.0),
-                        )
-
                     elif server_type == ServerType.STREAMABLE_HTTP:
                         # For Streamable HTTP servers, command field contains the URL
                         config = getattr(db_server, "config", {}) or {}
@@ -308,6 +258,8 @@ class MCPServerDomainService:
                             url=db_server.command,  # URL is stored in command field
                             tool_prefix=config.get("tool_prefix"),
                             timeout=config.get("timeout", 5.0),
+                            headers=config.get("headers"),
+                            sse_read_timeout=config.get("sse_read_timeout", 300.0),
                         )
 
                     else:
@@ -327,31 +279,3 @@ class MCPServerDomainService:
             logger.error(f"Error preparing MCP servers for agent: {e}")
 
         return mcp_servers
-
-    def _validate_server_config(self, server_type: ServerType, config: dict) -> dict:
-        """
-        Validate server configuration based on server type.
-
-        Args:
-            server_type: Type of MCP server
-            config: Configuration dictionary to validate
-
-        Returns:
-            Validated configuration dictionary
-
-        Raises:
-            ValueError: If configuration is invalid for the server type
-        """
-        from pydantic import ValidationError
-
-        try:
-            if server_type == ServerType.STDIO:
-                validated = StdioServerConfig(**config)
-            elif server_type in (ServerType.SSE, ServerType.STREAMABLE_HTTP):
-                validated = HTTPServerConfig(**config)
-            else:
-                raise ValueError(f"Unsupported server type: {server_type}")
-
-            return validated.model_dump()
-        except ValidationError as e:
-            raise ValueError(f"Invalid configuration for {server_type.value} server: {e}")
