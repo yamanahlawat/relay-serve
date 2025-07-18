@@ -29,7 +29,7 @@ async def list_mcp_servers(
     - **limit**: Maximum number of items to return (default: 10)
 
     ### Returns
-    List of all MCP server configurations with status and available tools
+    List of all MCP server configurations with status.
     """
     return await service.list_servers(offset=offset, limit=limit)
 
@@ -44,12 +44,13 @@ async def create_mcp_server(
     Create a new MCP server configuration.
 
     This endpoint allows creating new MCP server configurations directly from the frontend.
+    The server configuration is validated before creation.
 
     ### Parameters
     - **server**: MCP server configuration
 
     ### Returns
-    The created MCP server configuration with status
+    The created MCP server configuration with status.
     """
     return await service.create_server(server)
 
@@ -71,10 +72,11 @@ async def update_mcp_server(
     - **server**: MCP server configuration update
 
     ### Returns
-    The updated MCP server configuration with status
+    The updated MCP server configuration with status.
 
     ### Raises
     - **404**: Server not found
+    - **400**: Server validation failed
     """
     try:
         return await service.update_server(server_id, server)
@@ -92,7 +94,6 @@ async def delete_mcp_server(
     Delete an existing MCP server configuration.
 
     This endpoint allows deleting an existing MCP server configuration directly from the frontend.
-    If the server is running, it will be shut down before deletion.
 
     ### Parameters
     - **server_id**: UUID of the MCP server to delete

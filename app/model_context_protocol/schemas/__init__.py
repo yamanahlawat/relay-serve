@@ -2,7 +2,6 @@
 MCP server schemas and configuration models.
 """
 
-from .config import HTTPServerConfig, SSEServerConfig, StdioServerConfig, StreamableHTTPServerConfig
 from .servers import (
     MCPServerBase,
     MCPServerCreate,
@@ -11,7 +10,6 @@ from .servers import (
     MCPServerUpdate,
     ServerStatus,
 )
-from .tools import MCPTool
 
 __all__ = [
     # Server schemas
@@ -21,11 +19,4 @@ __all__ = [
     "MCPServerResponse",
     "MCPServerUpdate",
     "ServerStatus",
-    # Configuration schemas
-    "StdioServerConfig",
-    "HTTPServerConfig",
-    "SSEServerConfig",
-    "StreamableHTTPServerConfig",
-    # Tool schemas
-    "MCPTool",
 ]
