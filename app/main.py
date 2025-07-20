@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai.services.sse import get_sse_manager
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
 @asynccontextmanager
@@ -14,7 +15,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     """
     Context manager to handle the lifespan of the application.
     """
+    # Start enabled MCP servers from database
+    await mcp_lifecycle_manager.start_enabled_servers()
     yield
+    # Stop all running MCP servers
+    await mcp_lifecycle_manager.shutdown()
     # Get the SSE manager instance
     manager = await get_sse_manager()
     # Clean up Redis connections

@@ -279,3 +279,14 @@ class MCPServerDomainService:
             logger.error(f"Error preparing MCP servers for agent: {e}")
 
         return mcp_servers
+
+    async def get_running_servers_for_agent(self) -> list[MCPServerStdio | MCPServerStreamableHTTP]:
+        """
+        Get pre-started MCP servers from the lifecycle manager for agent use.
+
+        Returns:
+            List of running MCP server instances ready for agent use
+        """
+        from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
+
+        return await mcp_lifecycle_manager.get_running_servers()
