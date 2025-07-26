@@ -97,11 +97,11 @@ class MCPServerLifecycleManager:
                 task = self._server_tasks[server_name]
                 task.cancel()
 
-                # Wait for task to complete cancellation
+                # Wait for task to complete cancellation with timeout
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass  # Expected when we cancel the task
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass  # Expected when we cancel the task or it times out
 
                 # Remove from tracking
                 del self._servers[server_name]
@@ -203,11 +203,18 @@ class MCPServerLifecycleManager:
 
                 logger.info(f"Shutting down {len(self._servers)} MCP servers...")
 
-                # Stop each server individually
+                # Stop each server individually with timeout
                 server_names = list(self._servers.keys())
                 for server_name in server_names:
                     try:
-                        await self.stop_server(server_name)
+                        await asyncio.wait_for(self.stop_server(server_name), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout stopping server '{server_name}', forcing cleanup")
+                        # Force cleanup if timeout
+                        if server_name in self._servers:
+                            del self._servers[server_name]
+                        if server_name in self._server_tasks:
+                            del self._server_tasks[server_name]
                     except Exception as e:
                         logger.error(f"Error stopping server '{server_name}': {e}")
 
