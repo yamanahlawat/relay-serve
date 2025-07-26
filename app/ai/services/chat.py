@@ -44,8 +44,6 @@ from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-from app.model_context_protocol.crud.server import crud_mcp_server
-from app.model_context_protocol.models.server import MCPServer
 from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
@@ -64,62 +62,33 @@ class ChatService:
 
     def __init__(self) -> None:
         """Initialize the chat service with database session."""
-        self._agents: dict[str, Agent] = {}
         self.model_registry = CapabilityRegistry()
 
-    def _get_agent_key(self, provider: LLMProvider, model: LLMModel) -> str:
-        """Generate a unique key for caching agents."""
-        return f"{provider.type.value}:{model.name}"
-
-    async def _get_or_create_agent(
+    async def _create_agent(
         self,
         provider: LLMProvider,
         model: LLMModel,
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
     ) -> Agent:
-        """Get or create a cached agent for the provider with MCP tools."""
-        cache_key = self._get_agent_key(provider, model)
-
-        # Get MCP servers and cache key in single DB operation
+        """Create a fresh agent for the provider with MCP tools."""
+        # Get MCP servers
         try:
             async with AsyncSessionLocal() as db:
-                # Single DB call to get enabled servers
-                filters = [MCPServer.enabled]
-                enabled_servers = await crud_mcp_server.filter(db=db, filters=filters)
-                enabled_server_names = sorted([server.name for server in enabled_servers])
-
-                # Get running servers from lifecycle manager
                 mcp_service = MCPServerDomainService(db=db)
                 mcp_servers = await mcp_service.get_running_servers_for_agent()
                 logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
         except Exception as e:
             logger.warning(f"Failed to get MCP servers: {e}")
             mcp_servers = []
-            enabled_server_names = []
 
-        server_state_key = ":".join(enabled_server_names) if enabled_server_names else "no_servers"
-        full_cache_key = f"{cache_key}:{server_state_key}"
-
-        if full_cache_key not in self._agents:
-            logger.debug(f"Creating agent with {len(tools or [])} manual tools and {len(mcp_servers)} MCP servers")
-
-            self._agents[full_cache_key] = ProviderFactory.create_agent(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                tools=tools,
-                mcp_servers=mcp_servers or None,
-            )
-
-            # Clean up old cache entries for this model
-            keys_to_remove = [
-                key for key in self._agents.keys() if key.startswith(f"{cache_key}:") and key != full_cache_key
-            ]
-            for key in keys_to_remove:
-                del self._agents[key]
-
-        return self._agents[full_cache_key]
+        return ProviderFactory.create_agent(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+            mcp_servers=mcp_servers or None,
+        )
 
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
@@ -284,10 +253,8 @@ class ChatService:
             # Update message status to processing
             await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
 
-            # Get or create agent
-            agent = await self._get_or_create_agent(
-                provider=provider, model=model, system_prompt=system_prompt, tools=tools
-            )
+            # Create agent
+            agent = await self._create_agent(provider=provider, model=model, system_prompt=system_prompt, tools=tools)
 
             # Prepare message history and model settings
             message_history = await self._prepare_message_history(session_id, current_message)

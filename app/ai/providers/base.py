@@ -62,6 +62,6 @@ class ProviderBuilder(ABC):
 
         if system_prompt is not None:
             agent_kwargs["name"] = "Relay Agent"
-            agent_kwargs["system_prompt"] = system_prompt
+            agent_kwargs["instructions"] = system_prompt
 
         return Agent(**agent_kwargs)
