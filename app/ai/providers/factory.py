@@ -77,7 +77,7 @@ class ProviderFactory:
             ValueError: If provider type is not supported
         """
         builder = cls.get_builder(provider.type)
-        return builder.build_model(provider, model)
+        return builder.build_model(provider=provider, model=model)
 
     @classmethod
     def create_agent(
@@ -102,4 +102,6 @@ class ProviderFactory:
             ValueError: If provider type is not supported
         """
         builder = cls.get_builder(provider.type)
-        return builder.build_agent(provider, model, system_prompt, tools, mcp_servers)
+        return builder.build_agent(
+            provider=provider, model=model, system_prompt=system_prompt, tools=tools, mcp_servers=mcp_servers
+        )
