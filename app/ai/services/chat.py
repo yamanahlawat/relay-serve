@@ -4,6 +4,7 @@ from typing import Any, AsyncIterator
 from uuid import UUID
 
 from llm_registry import CapabilityRegistry
+from llm_registry.exceptions import ModelNotFoundError
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
@@ -43,6 +44,8 @@ from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
+from app.model_context_protocol.crud.server import crud_mcp_server
+from app.model_context_protocol.models.server import MCPServer
 from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
@@ -51,7 +54,7 @@ class ChatService:
     Service for handling chat completions with pydantic_ai
     """
 
-    # Attachment type mapping for cleaner code
+    # Attachment type mapping
     _ATTACHMENT_TYPE_MAP = {
         AttachmentType.IMAGE: ImageUrl,
         AttachmentType.VIDEO: VideoUrl,
@@ -68,18 +71,6 @@ class ChatService:
         """Generate a unique key for caching agents."""
         return f"{provider.type.value}:{model.name}"
 
-    async def _get_mcp_servers_for_agent(self) -> list:
-        """Get MCP servers for pydantic-ai agent."""
-        try:
-            async with AsyncSessionLocal() as db:
-                mcp_service = MCPServerDomainService(db=db)
-                mcp_servers = await mcp_service.get_mcp_servers_for_agent()
-                logger.debug(f"Retrieved {len(mcp_servers)} MCP servers for agent")
-                return mcp_servers
-        except Exception as e:
-            logger.warning(f"Failed to get MCP servers: {e}")
-            return []
-
     async def _get_or_create_agent(
         self,
         provider: LLMProvider,
@@ -90,21 +81,45 @@ class ChatService:
         """Get or create a cached agent for the provider with MCP tools."""
         cache_key = self._get_agent_key(provider, model)
 
-        if cache_key not in self._agents:
-            # Get MCP servers for the agent
-            mcp_servers = await self._get_mcp_servers_for_agent()
+        # Get MCP servers and cache key in single DB operation
+        try:
+            async with AsyncSessionLocal() as db:
+                # Single DB call to get enabled servers
+                filters = [MCPServer.enabled]
+                enabled_servers = await crud_mcp_server.filter(db=db, filters=filters)
+                enabled_server_names = sorted([server.name for server in enabled_servers])
 
+                # Get running servers from lifecycle manager
+                mcp_service = MCPServerDomainService(db=db)
+                mcp_servers = await mcp_service.get_running_servers_for_agent()
+                logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
+        except Exception as e:
+            logger.warning(f"Failed to get MCP servers: {e}")
+            mcp_servers = []
+            enabled_server_names = []
+
+        server_state_key = ":".join(enabled_server_names) if enabled_server_names else "no_servers"
+        full_cache_key = f"{cache_key}:{server_state_key}"
+
+        if full_cache_key not in self._agents:
             logger.debug(f"Creating agent with {len(tools or [])} manual tools and {len(mcp_servers)} MCP servers")
 
-            self._agents[cache_key] = ProviderFactory.create_agent(
+            self._agents[full_cache_key] = ProviderFactory.create_agent(
                 provider=provider,
                 model=model,
                 system_prompt=system_prompt,
                 tools=tools,
-                mcp_servers=mcp_servers,
+                mcp_servers=mcp_servers or None,
             )
 
-        return self._agents[cache_key]
+            # Clean up old cache entries for this model
+            keys_to_remove = [
+                key for key in self._agents.keys() if key.startswith(f"{cache_key}:") and key != full_cache_key
+            ]
+            for key in keys_to_remove:
+                del self._agents[key]
+
+        return self._agents[full_cache_key]
 
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
@@ -270,7 +285,9 @@ class ChatService:
             await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
 
             # Get or create agent
-            agent = await self._get_or_create_agent(provider, model, system_prompt, tools)
+            agent = await self._get_or_create_agent(
+                provider=provider, model=model, system_prompt=system_prompt, tools=tools
+            )
 
             # Prepare message history and model settings
             message_history = await self._prepare_message_history(session_id, current_message)
@@ -284,161 +301,157 @@ class ChatService:
                 user_prompt = [current_message.content]
 
             # Use pydantic_ai's rich streaming with message history and current user prompt
-            async with agent.run_mcp_servers():
-                async with agent.iter(
-                    user_prompt=user_prompt,
-                    message_history=message_history,
-                    model_settings=model_settings,
-                ) as run:
-                    async for node in run:
-                        if agent.is_user_prompt_node(node):
-                            # User prompt node - show processing message
-                            thinking_block = StreamBlockFactory.create_thinking_block("Understanding your request...")
-                            yield collect_and_yield_block(thinking_block)
+            # No need to start/stop servers - they're managed by the lifecycle manager
+            async with agent.iter(
+                user_prompt=user_prompt,
+                message_history=message_history,
+                model_settings=model_settings,
+            ) as run:
+                async for node in run:
+                    if agent.is_user_prompt_node(node):
+                        # User prompt node - show processing message
+                        thinking_block = StreamBlockFactory.create_thinking_block("Understanding your request...")
+                        yield collect_and_yield_block(thinking_block)
 
-                        elif agent.is_model_request_node(node):
-                            # Model request node - show response generation
-                            thinking_block = StreamBlockFactory.create_thinking_block("Thinking about your request...")
-                            yield collect_and_yield_block(thinking_block)
+                    elif agent.is_model_request_node(node):
+                        # Model request node - show response generation
+                        thinking_block = StreamBlockFactory.create_thinking_block("Thinking about your request...")
+                        yield collect_and_yield_block(thinking_block)
 
-                            async with node.stream(run.ctx) as request_stream:
-                                async for event in request_stream:
-                                    if isinstance(event, PartStartEvent):
-                                        if isinstance(event.part, ToolCallPart):
-                                            # Tool call starting - show thinking and tool info
-                                            tool_name = getattr(event.part, "tool_name", "unknown")
-                                            tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
+                        async with node.stream(run.ctx) as request_stream:
+                            async for event in request_stream:
+                                if isinstance(event, PartStartEvent):
+                                    if isinstance(event.part, ToolCallPart):
+                                        # Tool call starting - show thinking and tool info
+                                        tool_name = getattr(event.part, "tool_name", "unknown")
+                                        tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
 
-                                            # Start tracking this tool call with part index mapping
-                                            tool_tracker.start_tool_call(tool_call_id, tool_name, event.index)
+                                        # Start tracking this tool call with part index mapping
+                                        tool_tracker.start_tool_call(tool_call_id, tool_name, event.index)
 
-                                            # Show user-friendly thinking message for any MCP tool
-                                            thinking_block = StreamBlockFactory.create_thinking_block(
-                                                f"Let me use {tool_name} to help with that..."
-                                            )
-                                            yield collect_and_yield_block(thinking_block)
-
-                                            # Show tool call start
-                                            tool_start_block = StreamBlockFactory.create_tool_start_block(
-                                                tool_name=tool_name,
-                                                tool_call_id=tool_call_id,
-                                            )
-                                            yield collect_and_yield_block(tool_start_block)
-
-                                        elif isinstance(event.part, TextPart):
-                                            # Text response starting - yield the initial content
-                                            text_content = getattr(event.part, "content", "")
-                                            if text_content:
-                                                yield StreamBlockFactory.create_text_delta_block(
-                                                    text_content
-                                                ).model_dump_json()
-
-                                    elif isinstance(event, PartDeltaEvent):
-                                        if isinstance(event.delta, TextPartDelta):
-                                            # Text content delta - always stream for real-time display
-                                            content = event.delta.content_delta
-                                            if content:
-                                                yield StreamBlockFactory.create_text_delta_block(
-                                                    content
-                                                ).model_dump_json()
-
-                                        elif isinstance(event.delta, ToolCallPartDelta):
-                                            # Tool call arguments being built - stream raw delta chunks
-                                            args_delta = event.delta.args_delta
-                                            if args_delta:
-                                                # Get the tool call ID using part index mapping
-                                                tool_call_id = tool_tracker.get_tool_call_id_by_part_index(event.index)
-                                                if tool_call_id:
-                                                    # Get tool info for the args delta block
-                                                    tool_info = tool_tracker.get_tool_info(tool_call_id)
-                                                    tool_name = (
-                                                        tool_info.get("tool_name", "unknown")
-                                                        if tool_info
-                                                        else "unknown"
-                                                    )
-
-                                                    # Create and stream the args delta block with raw delta
-                                                    args_delta_block = StreamBlockFactory.create_tool_args_delta_block(
-                                                        tool_name=tool_name,
-                                                        tool_call_id=tool_call_id,
-                                                        args_delta=str(args_delta),
-                                                    )
-                                                    yield collect_and_yield_block(args_delta_block)
-
-                                    elif isinstance(event, FinalResultEvent):
-                                        # Final result from model - show completion
-                                        thinking_block = StreamBlockFactory.create_final_result_event_block(
-                                            tool_name=event.tool_name
+                                        # Show user-friendly thinking message for any MCP tool
+                                        thinking_block = StreamBlockFactory.create_thinking_block(
+                                            f"Let me use {tool_name} to help with that..."
                                         )
                                         yield collect_and_yield_block(thinking_block)
 
-                        elif agent.is_call_tools_node(node):
-                            # Tool execution node - show tool calls and results
-                            thinking_block = StreamBlockFactory.create_call_tools_node_start_block()
-                            yield collect_and_yield_block(thinking_block)
-
-                            async with node.stream(ctx=run.ctx) as handle_stream:
-                                async for event in handle_stream:
-                                    if isinstance(event, FunctionToolCallEvent):
-                                        # Tool is being called - show complete call info
-                                        tool_args = event.part.args
-                                        if isinstance(tool_args, str):
-                                            # Try to parse JSON string
-                                            try:
-                                                tool_args = json.loads(tool_args)
-                                            except (json.JSONDecodeError, TypeError):
-                                                tool_args = {"raw_args": tool_args}
-                                        elif not isinstance(tool_args, dict):
-                                            tool_args = {"args": tool_args}
-
-                                        # Mark tool call as completed in tracker
-                                        tool_tracker.complete_tool_call(event.part.tool_call_id)
-
-                                        # Show the tool call
-                                        tool_call_block = StreamBlockFactory.create_function_tool_call_event_block(
-                                            tool_name=event.part.tool_name,
-                                            tool_call_id=event.part.tool_call_id,
-                                            tool_args=tool_args,
-                                        )
-                                        yield collect_and_yield_block(tool_call_block)
-
-                                    elif isinstance(event, FunctionToolResultEvent):
-                                        # Tool result received - show result and interpretation
-                                        result_content = ""
-                                        if hasattr(event.result, "content"):
-                                            if isinstance(event.result.content, str):
-                                                result_content = event.result.content
-                                            elif isinstance(event.result.content, list):
-                                                result_content = ", ".join(str(item) for item in event.result.content)
-                                            else:
-                                                result_content = str(event.result.content)
-                                        else:
-                                            result_content = str(event.result)
-
-                                        # Get tool name from tracker before cleaning up
-                                        tool_info = tool_tracker.get_tool_info(event.tool_call_id)
-                                        tool_name = tool_info.get("tool_name", "unknown") if tool_info else "unknown"
-
-                                        # Show tool result
-                                        tool_result_block = StreamBlockFactory.create_function_tool_result_event_block(
-                                            tool_call_id=event.tool_call_id,
+                                        # Show tool call start
+                                        tool_start_block = StreamBlockFactory.create_tool_start_block(
                                             tool_name=tool_name,
-                                            result_content=result_content,
+                                            tool_call_id=tool_call_id,
                                         )
-                                        yield collect_and_yield_block(tool_result_block)
+                                        yield collect_and_yield_block(tool_start_block)
 
-                                        # Show user-friendly interpretation
-                                        interpretation = f"Got some helpful information from {tool_name}"
-                                        interpretation_block = StreamBlockFactory.create_thinking_block(interpretation)
-                                        yield collect_and_yield_block(interpretation_block)
+                                    elif isinstance(event.part, TextPart):
+                                        # Text response starting - yield the initial content
+                                        text_content = getattr(event.part, "content", "")
+                                        if text_content:
+                                            yield StreamBlockFactory.create_text_delta_block(
+                                                text_content
+                                            ).model_dump_json()
 
-                                        # Clean up tool tracking for completed call
-                                        tool_tracker.cleanup_tool_call(event.tool_call_id)
+                                elif isinstance(event, PartDeltaEvent):
+                                    if isinstance(event.delta, TextPartDelta):
+                                        # Text content delta
+                                        content = event.delta.content_delta
+                                        if content:
+                                            yield StreamBlockFactory.create_text_delta_block(content).model_dump_json()
 
-                        elif agent.is_end_node(node):
-                            # Agent run complete - will send final message block after streaming
-                            if run.result and run.result.output:
-                                assert run.result.output == node.data.output
+                                    elif isinstance(event.delta, ToolCallPartDelta):
+                                        # Tool call arguments being built - stream raw delta chunks
+                                        args_delta = event.delta.args_delta
+                                        if args_delta:
+                                            # Get the tool call ID using part index mapping
+                                            tool_call_id = tool_tracker.get_tool_call_id_by_part_index(event.index)
+                                            if tool_call_id:
+                                                # Get tool info for the args delta block
+                                                tool_info = tool_tracker.get_tool_info(tool_call_id)
+                                                tool_name = (
+                                                    tool_info.get("tool_name", "unknown") if tool_info else "unknown"
+                                                )
+
+                                                # Create and stream the args delta block with raw delta
+                                                args_delta_block = StreamBlockFactory.create_tool_args_delta_block(
+                                                    tool_name=tool_name,
+                                                    tool_call_id=tool_call_id,
+                                                    args_delta=str(args_delta),
+                                                )
+                                                yield collect_and_yield_block(args_delta_block)
+
+                                elif isinstance(event, FinalResultEvent):
+                                    # Final result from model - show completion
+                                    thinking_block = StreamBlockFactory.create_final_result_event_block(
+                                        tool_name=event.tool_name
+                                    )
+                                    yield collect_and_yield_block(thinking_block)
+
+                    elif agent.is_call_tools_node(node):
+                        # Tool execution node - show tool calls and results
+                        thinking_block = StreamBlockFactory.create_call_tools_node_start_block()
+                        yield collect_and_yield_block(thinking_block)
+
+                        async with node.stream(ctx=run.ctx) as handle_stream:
+                            async for event in handle_stream:
+                                if isinstance(event, FunctionToolCallEvent):
+                                    # Tool is being called - show complete call info
+                                    tool_args = event.part.args
+                                    if isinstance(tool_args, str):
+                                        # Try to parse JSON string
+                                        try:
+                                            tool_args = json.loads(tool_args)
+                                        except (json.JSONDecodeError, TypeError):
+                                            tool_args = {"raw_args": tool_args}
+                                    elif not isinstance(tool_args, dict):
+                                        tool_args = {"args": tool_args}
+
+                                    # Mark tool call as completed in tracker
+                                    tool_tracker.complete_tool_call(event.part.tool_call_id)
+
+                                    # Show the tool call
+                                    tool_call_block = StreamBlockFactory.create_function_tool_call_event_block(
+                                        tool_name=event.part.tool_name,
+                                        tool_call_id=event.part.tool_call_id,
+                                        tool_args=tool_args,
+                                    )
+                                    yield collect_and_yield_block(tool_call_block)
+
+                                elif isinstance(event, FunctionToolResultEvent):
+                                    # Tool result received - show result and interpretation
+                                    result_content = ""
+                                    if hasattr(event.result, "content"):
+                                        if isinstance(event.result.content, str):
+                                            result_content = event.result.content
+                                        elif isinstance(event.result.content, list):
+                                            result_content = ", ".join(str(item) for item in event.result.content)
+                                        else:
+                                            result_content = str(event.result.content)
+                                    else:
+                                        result_content = str(event.result)
+
+                                    # Get tool name from tracker before cleaning up
+                                    tool_info = tool_tracker.get_tool_info(event.tool_call_id)
+                                    tool_name = tool_info.get("tool_name", "unknown") if tool_info else "unknown"
+
+                                    # Show tool result
+                                    tool_result_block = StreamBlockFactory.create_function_tool_result_event_block(
+                                        tool_call_id=event.tool_call_id,
+                                        tool_name=tool_name,
+                                        result_content=result_content,
+                                    )
+                                    yield collect_and_yield_block(tool_result_block)
+
+                                    # Show user-friendly interpretation
+                                    interpretation = f"Got some helpful information from {tool_name}"
+                                    interpretation_block = StreamBlockFactory.create_thinking_block(interpretation)
+                                    yield collect_and_yield_block(interpretation_block)
+
+                                    # Clean up tool tracking for completed call
+                                    tool_tracker.cleanup_tool_call(event.tool_call_id)
+
+                    elif agent.is_end_node(node):
+                        # Agent run complete - will send final message block after streaming
+                        if run.result and run.result.output:
+                            assert run.result.output == node.data.output
 
             # Clean up tool tracker state after streaming completes
             tool_tracker.reset()
@@ -515,7 +528,11 @@ class ChatService:
         """
         Calculate input, output, and total costs based on model pricing.
         """
-        model_capability = self.model_registry.get_model(model_id=model.name)
+        try:
+            model_capability = self.model_registry.get_model(model_id=model.name)
+        except ModelNotFoundError:
+            model_capability = None
+
         if not model_capability or not model_capability.token_costs:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}

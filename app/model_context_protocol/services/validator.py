@@ -1,10 +1,10 @@
 import asyncio
 
 from loguru import logger
-from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
 
 from app.model_context_protocol.constants import ServerType
 from app.model_context_protocol.schemas.servers import MCPServerBase
+from app.model_context_protocol.utils import create_server_instance_from_config
 
 
 class MCPServerValidator:
@@ -45,23 +45,8 @@ class MCPServerValidator:
     async def _validate_stdio_server(self, server_name: str, config: MCPServerBase) -> tuple[bool, str | None]:
         """Validate stdio server connectivity."""
         try:
-            # Get configuration from the config field
-            server_config = config.config or {}
-            command_args = server_config.get("args", [])
-
-            # Extract environment variables
-            env_vars = {}
-            if config.env:
-                env_vars = {key: value.get_secret_value() for key, value in config.env.items()}
-
-            # Create pydantic-ai MCP server instance
-            mcp_server = MCPServerStdio(
-                command=config.command,
-                args=command_args,
-                env=env_vars,
-                tool_prefix=server_config.get("tool_prefix"),
-                cwd=server_config.get("cwd"),
-            )
+            # Create pydantic-ai MCP server instance using shared utility
+            mcp_server = create_server_instance_from_config(config)
 
             # Use the server as an async context manager to do a validation
             async with mcp_server as session:
@@ -92,16 +77,8 @@ class MCPServerValidator:
         Validate streamable HTTP server connectivity.
         """
         try:
-            # Get configuration
-            server_config = config.config or {}
-
-            # Create pydantic-ai MCP server instance
-            mcp_server = MCPServerStreamableHTTP(
-                url=config.command,  # URL is stored in command field
-                tool_prefix=server_config.get("tool_prefix"),
-                headers=server_config.get("headers"),
-                sse_read_timeout=server_config.get("sse_read_timeout", 30.0),
-            )
+            # Create pydantic-ai MCP server instance using shared utility
+            mcp_server = create_server_instance_from_config(config)
 
             # Use the server as an async context manager to do a validation
             async with mcp_server as session:
@@ -121,7 +98,3 @@ class MCPServerValidator:
         except Exception as e:
             logger.exception(f"Error validating streamable HTTP server {server_name}")
             return False, str(e)
-
-
-# Create a singleton instance
-mcp_server_validator = MCPServerValidator()

@@ -26,7 +26,7 @@ Relay is a FastAPI-based LLM Studio with a modular domain-driven architecture. T
 - **`app/ai/`** - Pydantic-AI integration with streaming chat completion using SSE
 - **`app/chat/`** - Chat session and message management with PostgreSQL persistence
 - **`app/llms/`** - Multi-provider LLM management (OpenAI, Anthropic, Ollama, etc.)
-- **`app/model_context_protocol/`** - MCP server configuration and validation
+- **`app/model_context_protocol/`** - MCP server lifecycle management and tool execution
 - **`app/database/`** - SQLAlchemy with async PostgreSQL, generic CRUD pattern
 - **`app/core/`** - Configuration management with pydantic-settings
 
@@ -42,14 +42,14 @@ Relay is a FastAPI-based LLM Studio with a modular domain-driven architecture. T
 
 ## MCP Server Integration
 
-The MCP system uses pydantic-ai's native MCP handling:
+The MCP system is the most complex component:
 
-- **Configuration**: MCP servers are stored in PostgreSQL with flexible config field
-- **Validation**: Simple validation on create/update using pydantic-ai classes
-- **Tool Execution**: Pydantic-AI agents handle tool discovery, caching, and execution natively
+- **Lifecycle Management**: `MCPServerLifecycleManager` handles server startup/shutdown during app lifespan
+- **Process Management**: `MCPProcessManager` manages individual server processes (stdio/HTTP)
+- **Tool Execution**: `MCPToolService` handles tool calls with event-driven architecture
 - **Server Types**: Support for `stdio` (subprocess) and `streamable_http` (HTTP transport)
 
-MCP servers are configured via `config: dict` field and passed directly to pydantic-ai agents.
+MCP servers are configured via `config: dict` field - validation is handled by pydantic-ai classes, not custom schemas.
 
 ## Development Workflows
 
