@@ -9,84 +9,178 @@ Uses pydantic-ai's native lifecycle management patterns with AsyncExitStack.
 """
 
 import asyncio
-from contextlib import AsyncExitStack
 
 from loguru import logger
 from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
 
 from app.database.session import AsyncSessionLocal
-from app.model_context_protocol.services.domain import MCPServerDomainService
+from app.model_context_protocol.crud.server import crud_mcp_server
+from app.model_context_protocol.models.server import MCPServer
+from app.model_context_protocol.utils import create_server_instance_from_db
 
 
 class MCPServerLifecycleManager:
     """
-    Manages the lifecycle of MCP servers using pydantic-ai's native patterns.
+    Manages the lifecycle of individual MCP servers using pydantic-ai's native patterns.
 
     This singleton service:
-    - Uses AsyncExitStack for proper resource management
+    - Manages servers individually for granular control
+    - Uses AsyncExitStack per server for proper resource management
     - Leverages pydantic-ai's built-in reference counting
     - Handles graceful startup and shutdown
     """
 
     def __init__(self) -> None:
         """Initialize the lifecycle manager."""
-        self._servers: list[MCPServerStdio | MCPServerStreamableHTTP] = []
-        self._exit_stack: AsyncExitStack | None = None
-        self._started = False
+        self._servers: dict[str, MCPServerStdio | MCPServerStreamableHTTP] = {}
+        self._server_tasks: dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
+
+    async def start_server(self, server_name: str, server_instance: MCPServerStdio | MCPServerStreamableHTTP) -> bool:
+        """
+        Start an individual MCP server.
+
+        Args:
+            server_name: Name identifier for the server
+            server_instance: The MCP server instance to start
+
+        Returns:
+            True if started successfully, False otherwise
+        """
+        async with self._lock:
+            if server_name in self._servers:
+                logger.warning(f"Server '{server_name}' is already running")
+                return True
+
+            try:
+                # Create a task to manage the server lifecycle
+                async def server_task():
+                    async with server_instance:
+                        # Keep the server running until task is cancelled
+                        try:
+                            while True:
+                                await asyncio.sleep(1)
+                        except asyncio.CancelledError:
+                            logger.debug(f"Server task for '{server_name}' cancelled")
+                            raise
+
+                task = asyncio.create_task(server_task(), name=f"mcp_server_{server_name}")
+
+                # Store the server and its task
+                self._servers[server_name] = server_instance
+                self._server_tasks[server_name] = task
+
+                logger.info(f"Started MCP server: {server_name}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to start MCP server '{server_name}': {e}")
+                return False
+
+    async def stop_server(self, server_name: str) -> bool:
+        """
+        Stop an individual MCP server.
+
+        Args:
+            server_name: Name identifier for the server to stop
+
+        Returns:
+            True if stopped successfully, False if not found
+        """
+        async with self._lock:
+            if server_name not in self._servers:
+                # Server already stopped - this is fine, return success
+                return True
+
+            try:
+                # Cancel the server task
+                task = self._server_tasks[server_name]
+                task.cancel()
+
+                # Wait for task to complete cancellation
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass  # Expected when we cancel the task
+
+                # Remove from tracking
+                del self._servers[server_name]
+                del self._server_tasks[server_name]
+
+                logger.info(f"Stopped MCP server: {server_name}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to stop MCP server '{server_name}': {e}")
+                # Clean up tracking even if stop failed
+                if server_name in self._servers:
+                    del self._servers[server_name]
+                if server_name in self._server_tasks:
+                    del self._server_tasks[server_name]
+                return False
+
+    async def restart_server(self, server_name: str, server_instance: MCPServerStdio | MCPServerStreamableHTTP) -> bool:
+        """
+        Restart an individual MCP server.
+
+        Args:
+            server_name: Name identifier for the server
+            server_instance: The new MCP server instance
+
+        Returns:
+            True if restarted successfully, False otherwise
+        """
+        logger.info(f"Restarting MCP server: {server_name}")
+        await self.stop_server(server_name)
+        return await self.start_server(server_name, server_instance)
 
     async def start_enabled_servers(self) -> None:
         """
-        Start all enabled MCP servers using pydantic-ai's lifecycle patterns.
-
-        Uses AsyncExitStack for proper resource management.
+        Start all enabled MCP servers from database (used at app startup).
         """
-        async with self._lock:
-            if self._started:
-                logger.warning("MCP servers are already started")
+        try:
+            # Get enabled servers from database with their names
+            async with AsyncSessionLocal() as db:
+                filters = [MCPServer.enabled]
+                db_servers = await crud_mcp_server.filter(db=db, filters=filters)
+
+            if not db_servers:
+                logger.info("No enabled MCP servers configured")
                 return
 
-            self._exit_stack = AsyncExitStack()
+            logger.info(f"Starting {len(db_servers)} enabled MCP servers...")
 
-            try:
-                # Get servers from database
-                async with AsyncSessionLocal() as db:
-                    mcp_service = MCPServerDomainService(db=db)
-                    servers = await mcp_service.get_mcp_servers_for_agent()
+            # Start all servers concurrently
+            startup_tasks = []
+            for db_server in db_servers:
+                task = asyncio.create_task(self._start_single_server(db_server), name=f"start_{db_server.name}")
+                startup_tasks.append(task)
 
-                if not servers:
-                    logger.info("No MCP servers configured")
-                    self._started = True
-                    return
+            # Execute all startups concurrently
+            results = await asyncio.gather(*startup_tasks, return_exceptions=True)
 
-                logger.info(f"Starting {len(servers)} MCP servers...")
+            # Count successes and log failures
+            started_count = sum(1 for result in results if result is True)
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to start server '{db_servers[i].name}': {result}")
 
-                # Start servers using pydantic-ai's context manager pattern
-                started_servers = []
-                for i, server in enumerate(servers):
-                    try:
-                        # Let pydantic-ai handle the lifecycle through AsyncExitStack
-                        await self._exit_stack.enter_async_context(server)
-                        started_servers.append(server)
+            logger.info(f"Successfully started {started_count}/{len(db_servers)} MCP servers")
 
-                        # Get server identifier for logging
-                        server_name = getattr(server, "command", getattr(server, "url", f"server_{i}"))
-                        logger.debug(f"Started MCP server: {server_name}")
+        except Exception as e:
+            logger.error(f"Failed to start MCP servers: {e}")
+            raise
 
-                    except Exception as e:
-                        logger.error(f"Failed to start MCP server {i}: {e}")
-                        # Continue with other servers rather than failing completely
-                        continue
-
-                self._servers = started_servers
-                self._started = True
-
-                logger.info(f"Successfully started {len(self._servers)}/{len(servers)} MCP servers")
-
-            except Exception as e:
-                logger.error(f"Failed to start MCP servers: {e}")
-                await self._cleanup()
-                raise
+    async def _start_single_server(self, db_server) -> bool:
+        """Start a single server with error handling for concurrent startup."""
+        try:
+            server_instance = create_server_instance_from_db(db_server)
+            if server_instance:
+                return await self.start_server(db_server.name, server_instance)
+            return False
+        except Exception as e:
+            logger.error(f"Failed to start MCP server '{db_server.name}': {e}")
+            return False
 
     async def get_running_servers(self) -> list[MCPServerStdio | MCPServerStreamableHTTP]:
         """
@@ -95,43 +189,33 @@ class MCPServerLifecycleManager:
         Returns:
             List of running MCP server instances ready for agent use
         """
-        async with self._lock:
-            if not self._started:
-                logger.warning("MCP servers are not started yet. Call start_enabled_servers() first.")
-                return []
-
-            # Return copy of servers - pydantic-ai manages server state internally
-            return self._servers.copy()
+        return list(self._servers.values())
 
     async def shutdown(self) -> None:
         """
-        Shutdown all running MCP servers using pydantic-ai's lifecycle management.
-        """
-        async with self._lock:
-            if not self._started:
-                logger.debug("MCP servers are not started, nothing to shutdown")
-                return
-
-            logger.info(f"Shutting down {len(self._servers)} MCP servers...")
-
-            await self._cleanup()
-            logger.info("All MCP servers have been shut down")
-
-    async def _cleanup(self) -> None:
-        """
-        Internal cleanup using AsyncExitStack for proper resource management.
+        Shutdown all running MCP servers (used at app shutdown).
         """
         try:
-            if self._exit_stack:
-                # Let AsyncExitStack handle proper shutdown of all servers
-                await self._exit_stack.aclose()
-                self._exit_stack = None
-        except Exception as e:
-            logger.error(f"Error during server cleanup: {e}")
-        finally:
-            # Reset state
-            self._servers.clear()
-            self._started = False
+            async with self._lock:
+                if not self._servers:
+                    logger.debug("No MCP servers running, nothing to shutdown")
+                    return
+
+                logger.info(f"Shutting down {len(self._servers)} MCP servers...")
+
+                # Stop each server individually
+                server_names = list(self._servers.keys())
+                for server_name in server_names:
+                    try:
+                        await self.stop_server(server_name)
+                    except Exception as e:
+                        logger.error(f"Error stopping server '{server_name}': {e}")
+
+                logger.info("All MCP servers have been shut down")
+        except asyncio.CancelledError:
+            # Handle graceful shutdown cancellation
+            logger.info("MCP server shutdown was cancelled")
+            raise
 
 
 # Global singleton instance

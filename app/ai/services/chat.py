@@ -4,6 +4,7 @@ from typing import Any, AsyncIterator
 from uuid import UUID
 
 from llm_registry import CapabilityRegistry
+from llm_registry.exceptions import ModelNotFoundError
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
@@ -43,6 +44,8 @@ from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
+from app.model_context_protocol.crud.server import crud_mcp_server
+from app.model_context_protocol.models.server import MCPServer
 from app.model_context_protocol.services.domain import MCPServerDomainService
 
 
@@ -51,7 +54,7 @@ class ChatService:
     Service for handling chat completions with pydantic_ai
     """
 
-    # Attachment type mapping for cleaner code
+    # Attachment type mapping
     _ATTACHMENT_TYPE_MAP = {
         AttachmentType.IMAGE: ImageUrl,
         AttachmentType.VIDEO: VideoUrl,
@@ -68,19 +71,6 @@ class ChatService:
         """Generate a unique key for caching agents."""
         return f"{provider.type.value}:{model.name}"
 
-    async def _get_mcp_servers_for_agent(self) -> list:
-        """Get pre-started MCP servers from the lifecycle manager for pydantic-ai agent."""
-        try:
-            # Use running servers from the lifecycle manager instead of creating new ones
-            async with AsyncSessionLocal() as db:
-                mcp_service = MCPServerDomainService(db=db)
-                mcp_servers = await mcp_service.get_running_servers_for_agent()
-                logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
-                return mcp_servers
-        except Exception as e:
-            logger.warning(f"Failed to get running MCP servers: {e}")
-            return []
-
     async def _get_or_create_agent(
         self,
         provider: LLMProvider,
@@ -91,21 +81,45 @@ class ChatService:
         """Get or create a cached agent for the provider with MCP tools."""
         cache_key = self._get_agent_key(provider, model)
 
-        if cache_key not in self._agents:
-            # Get MCP servers for the agent
-            mcp_servers = await self._get_mcp_servers_for_agent()
+        # Get MCP servers and cache key in single DB operation
+        try:
+            async with AsyncSessionLocal() as db:
+                # Single DB call to get enabled servers
+                filters = [MCPServer.enabled]
+                enabled_servers = await crud_mcp_server.filter(db=db, filters=filters)
+                enabled_server_names = sorted([server.name for server in enabled_servers])
 
+                # Get running servers from lifecycle manager
+                mcp_service = MCPServerDomainService(db=db)
+                mcp_servers = await mcp_service.get_running_servers_for_agent()
+                logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
+        except Exception as e:
+            logger.warning(f"Failed to get MCP servers: {e}")
+            mcp_servers = []
+            enabled_server_names = []
+
+        server_state_key = ":".join(enabled_server_names) if enabled_server_names else "no_servers"
+        full_cache_key = f"{cache_key}:{server_state_key}"
+
+        if full_cache_key not in self._agents:
             logger.debug(f"Creating agent with {len(tools or [])} manual tools and {len(mcp_servers)} MCP servers")
 
-            self._agents[cache_key] = ProviderFactory.create_agent(
+            self._agents[full_cache_key] = ProviderFactory.create_agent(
                 provider=provider,
                 model=model,
                 system_prompt=system_prompt,
                 tools=tools,
-                mcp_servers=mcp_servers,
+                mcp_servers=mcp_servers or None,
             )
 
-        return self._agents[cache_key]
+            # Clean up old cache entries for this model
+            keys_to_remove = [
+                key for key in self._agents.keys() if key.startswith(f"{cache_key}:") and key != full_cache_key
+            ]
+            for key in keys_to_remove:
+                del self._agents[key]
+
+        return self._agents[full_cache_key]
 
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
@@ -271,7 +285,9 @@ class ChatService:
             await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
 
             # Get or create agent
-            agent = await self._get_or_create_agent(provider, model, system_prompt, tools)
+            agent = await self._get_or_create_agent(
+                provider=provider, model=model, system_prompt=system_prompt, tools=tools
+            )
 
             # Prepare message history and model settings
             message_history = await self._prepare_message_history(session_id, current_message)
@@ -336,7 +352,7 @@ class ChatService:
 
                                 elif isinstance(event, PartDeltaEvent):
                                     if isinstance(event.delta, TextPartDelta):
-                                        # Text content delta - always stream for real-time display
+                                        # Text content delta
                                         content = event.delta.content_delta
                                         if content:
                                             yield StreamBlockFactory.create_text_delta_block(content).model_dump_json()
@@ -512,7 +528,11 @@ class ChatService:
         """
         Calculate input, output, and total costs based on model pricing.
         """
-        model_capability = self.model_registry.get_model(model_id=model.name)
+        try:
+            model_capability = self.model_registry.get_model(model_id=model.name)
+        except ModelNotFoundError:
+            model_capability = None
+
         if not model_capability or not model_capability.token_costs:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}

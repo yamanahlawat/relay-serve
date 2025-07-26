@@ -12,16 +12,16 @@ dependencies = [
     "sqlalchemy>=2.0.41",
     "greenlet>=3.2.3",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.33.0",
+    "sentry-sdk[fastapi,sqlalchemy]>=2.33.2",
     "redis[hiredis]>=6.2.0",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
     "pybase64>=1.4.1",
-    "mcp[cli]>=1.12.0",
+    "mcp[cli]>=1.12.2",
     "llm-registry>=0.4.0",
     "alembic-postgresql-enum>=1.8.0",
-    "pydantic-ai[logfire]>=0.4.4",
+    "pydantic-ai[logfire]>=0.4.7",
     "pydantic>=2.11.7",
 ]
 
@@ -29,6 +29,6 @@ dependencies = [
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.2.0",
-    "ruff>=0.12.4",
+    "ruff>=0.12.5",
     "tomli-w>=1.2.0",
 ]

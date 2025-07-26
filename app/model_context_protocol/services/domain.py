@@ -1,11 +1,9 @@
-from typing import Any
 from uuid import UUID
 
 from loguru import logger
 from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.model_context_protocol.constants import ServerType
 from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.exceptions import MCPServerError
 from app.model_context_protocol.schemas.servers import (
@@ -15,7 +13,9 @@ from app.model_context_protocol.schemas.servers import (
     MCPServerUpdate,
     ServerStatus,
 )
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 from app.model_context_protocol.services.validator import MCPServerValidator
+from app.model_context_protocol.utils import create_server_instance_from_db
 
 
 class MCPServerDomainService:
@@ -154,6 +154,9 @@ class MCPServerDomainService:
         # Determine status based on enabled flag
         status = ServerStatus.DISABLED if not updated.enabled else ServerStatus.RUNNING
 
+        # Handle individual server status changes efficiently
+        await self._handle_server_lifecycle_change(updated_server=updated)
+
         # Return MCPServerResponse without tools (lazy loaded)
         return MCPServerResponse(
             **updated.__dict__,
@@ -177,109 +180,6 @@ class MCPServerDomainService:
         # Delete the server from database
         await crud_mcp_server.delete(db=self.db, id=server_id)
 
-    async def validate_server_with_tools(self, server_id: UUID) -> dict[str, Any]:
-        """
-        Validate a server and get its tools.
-
-        Args:
-            server_id: UUID of the server to validate
-
-        Returns:
-            Dictionary with validation results including tools list
-
-        Raises:
-            MCPServerError: If the server is not found
-        """
-        # Get the server from database
-        db_server = await crud_mcp_server.get(db=self.db, id=server_id)
-        if not db_server:
-            raise MCPServerError("Server not found")
-
-        # Convert database model to schema for validation
-        server_config = MCPServerBase(
-            command=db_server.command,
-            server_type=db_server.server_type,
-            config=db_server.config,
-            enabled=db_server.enabled,
-            env=db_server.env,
-        )
-
-        # Validate server - this will check connectivity and list tools
-        is_valid, error_msg = await self.validator.validate_server(db_server.name, server_config)
-
-        return {
-            "server_id": server_id,
-            "server_name": db_server.name,
-            "is_valid": is_valid,
-            "error_message": error_msg,
-        }
-
-    async def get_mcp_servers_for_agent(self) -> list:
-        """
-        Get MCP servers configured for pydantic-ai agent use.
-
-        Returns:
-            List of pydantic-ai MCPServer instances
-        """
-        mcp_servers = []
-
-        try:
-            # Get enabled servers from database
-            enabled_servers = await crud_mcp_server.filter(
-                db=self.db, filters=[crud_mcp_server.model.enabled], limit=100
-            )
-
-            for db_server in enabled_servers:
-                try:
-                    # Get server type from the schema
-                    server_type = getattr(db_server, "server_type", None) or ServerType.STDIO
-
-                    if server_type == ServerType.STDIO:
-                        # Get configuration from the config field
-                        config = getattr(db_server, "config", {}) or {}
-
-                        # Get command args from config
-                        command_args = config.get("args", [])
-
-                        mcp_server = MCPServerStdio(
-                            command=db_server.command,
-                            args=command_args,
-                            env=db_server.env or {},
-                            tool_prefix=config.get("tool_prefix"),
-                            timeout=config.get("timeout", 5.0),
-                            cwd=config.get("cwd"),
-                        )
-
-                    elif server_type == ServerType.STREAMABLE_HTTP:
-                        # For Streamable HTTP servers, command field contains the URL
-                        config = getattr(db_server, "config", {}) or {}
-
-                        mcp_server = MCPServerStreamableHTTP(
-                            url=db_server.command,  # URL is stored in command field
-                            tool_prefix=config.get("tool_prefix"),
-                            timeout=config.get("timeout", 5.0),
-                            headers=config.get("headers"),
-                            sse_read_timeout=config.get("sse_read_timeout", 300.0),
-                        )
-
-                    else:
-                        logger.warning(f"Unsupported MCP server type '{server_type}' for server '{db_server.name}'")
-                        continue
-
-                    mcp_servers.append(mcp_server)
-                    logger.debug(f"Added MCP server '{db_server.name}' (type: {server_type.value}) for agent")
-
-                except Exception as e:
-                    logger.warning(f"Failed to create MCP server '{db_server.name}' for agent: {e}")
-                    continue
-
-            logger.info(f"Prepared {len(mcp_servers)} MCP servers for pydantic-ai agent")
-
-        except Exception as e:
-            logger.error(f"Error preparing MCP servers for agent: {e}")
-
-        return mcp_servers
-
     async def get_running_servers_for_agent(self) -> list[MCPServerStdio | MCPServerStreamableHTTP]:
         """
         Get pre-started MCP servers from the lifecycle manager for agent use.
@@ -287,6 +187,20 @@ class MCPServerDomainService:
         Returns:
             List of running MCP server instances ready for agent use
         """
-        from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
-
         return await mcp_lifecycle_manager.get_running_servers()
+
+    async def _handle_server_lifecycle_change(self, updated_server):
+        """Handle individual server lifecycle changes efficiently."""
+
+        if updated_server.enabled:
+            # Server is enabled - start or restart it
+            server_instance = create_server_instance_from_db(db_server=updated_server)
+            if server_instance:
+                await mcp_lifecycle_manager.restart_server(
+                    server_name=updated_server.name, server_instance=server_instance
+                )
+                logger.info(f"Started/restarted MCP server: {updated_server.name}")
+        else:
+            # Server is disabled - stop it
+            await mcp_lifecycle_manager.stop_server(server_name=updated_server.name)
+            logger.info(f"Stopped MCP server: {updated_server.name}")
