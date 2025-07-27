@@ -45,7 +45,7 @@ from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-from app.model_context_protocol.services.domain import MCPServerDomainService
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
 class ChatService:
@@ -73,11 +73,9 @@ class ChatService:
         tools: list[Any] | None = None,
     ) -> Agent:
         """Create an agent for the provider with MCP tools."""
-        # Get MCP servers
-        async with AsyncSessionLocal() as db:
-            mcp_service = MCPServerDomainService(db=db)
-            mcp_servers = await mcp_service.get_running_servers_for_agent()
-            logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
+        # Get MCP servers directly from lifecycle manager
+        mcp_servers = await mcp_lifecycle_manager.get_running_servers()
+        logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
 
         return ProviderFactory.create_agent(
             provider=provider,
