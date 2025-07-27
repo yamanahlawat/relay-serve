@@ -3,10 +3,9 @@
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.providers.mistral import MistralProvider
 
+from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-
-from .base import ProviderBuilder
 
 
 class MistralProviderBuilder(ProviderBuilder):

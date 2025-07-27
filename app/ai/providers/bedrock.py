@@ -3,10 +3,9 @@
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.providers.bedrock import BedrockProvider
 
+from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-
-from .base import ProviderBuilder
 
 
 class BedrockProviderBuilder(ProviderBuilder):

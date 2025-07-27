@@ -17,7 +17,6 @@ dependencies = [
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
-    "pybase64>=1.4.1",
     "mcp[cli]>=1.12.2",
     "llm-registry>=0.4.0",
     "alembic-postgresql-enum>=1.8.0",

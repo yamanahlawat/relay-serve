@@ -3,10 +3,9 @@
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
+from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-
-from .base import ProviderBuilder
 
 
 class AnthropicProviderBuilder(ProviderBuilder):

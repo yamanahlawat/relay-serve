@@ -3,10 +3,9 @@
 from pydantic_ai.models.cohere import CohereModel
 from pydantic_ai.providers.cohere import CohereProvider
 
+from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-
-from .base import ProviderBuilder
 
 
 class CohereProviderBuilder(ProviderBuilder):

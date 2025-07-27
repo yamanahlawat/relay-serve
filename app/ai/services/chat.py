@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
@@ -71,16 +72,12 @@ class ChatService:
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
     ) -> Agent:
-        """Create a fresh agent for the provider with MCP tools."""
+        """Create an agent for the provider with MCP tools."""
         # Get MCP servers
-        try:
-            async with AsyncSessionLocal() as db:
-                mcp_service = MCPServerDomainService(db=db)
-                mcp_servers = await mcp_service.get_running_servers_for_agent()
-                logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
-        except Exception as e:
-            logger.warning(f"Failed to get MCP servers: {e}")
-            mcp_servers = []
+        async with AsyncSessionLocal() as db:
+            mcp_service = MCPServerDomainService(db=db)
+            mcp_servers = await mcp_service.get_running_servers_for_agent()
+            logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
 
         return ProviderFactory.create_agent(
             provider=provider,
@@ -251,14 +248,18 @@ class ChatService:
                     raise ValueError(f"Message {message_id} not found or has no content")
 
             # Update message status to processing
-            await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
+            await self._update_message_status(
+                session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
+            )
 
             # Create agent
             agent = await self._create_agent(provider=provider, model=model, system_prompt=system_prompt, tools=tools)
 
             # Prepare message history and model settings
-            message_history = await self._prepare_message_history(session_id, current_message)
-            model_settings = self._prepare_model_settings(model, temperature, max_tokens)
+            message_history = await self._prepare_message_history(
+                session_id=session_id, current_message=current_message
+            )
+            model_settings = self._prepare_model_settings(model=model, temperature=temperature, max_tokens=max_tokens)
 
             # Prepare user prompt with attachments
             attachment_messages = await self._convert_attachments_to_pydantic(current_message)
@@ -420,9 +421,6 @@ class ChatService:
                         if run.result and run.result.output:
                             assert run.result.output == node.data.output
 
-            # Clean up tool tracker state after streaming completes
-            tool_tracker.reset()
-
             # Save AI response to database after streaming completes
             final_output = run.result.output if run.result else None
             if final_output and str(final_output).strip():
@@ -468,9 +466,7 @@ class ChatService:
                 yield final_block.model_dump_json()
 
             # Update original message status to completed
-            await self._update_message_status(
-                session_id, message_id, MessageStatus.COMPLETED, {"processing_complete": True}
-            )
+            await self._update_message_status(session_id, message_id, MessageStatus.COMPLETED)
         except ValidationError as error:
             logger.error(f"Validation error in stream_response: {error}")
             raise ValueError(f"Invalid input data: {error}") from error
@@ -481,15 +477,15 @@ class ChatService:
             logger.error(f"AI error in stream_response: {error}")
             raise
         finally:
-            # Clean up tool tracker and update message status on error
+            # Clean up tool tracker state after streaming completes
             if "tool_tracker" in locals():
                 tool_tracker.reset()
 
             # Update message status to failed if we're in an exception context
-            import sys
-
             if sys.exc_info()[0] is not None:
-                await self._update_message_status(session_id, message_id, MessageStatus.FAILED)
+                await self._update_message_status(
+                    session_id=session_id, message_id=message_id, status=MessageStatus.FAILED
+                )
 
     def _calculate_cost(self, model: LLMModel, input_tokens: int, output_tokens: int) -> dict[str, float]:
         """
@@ -504,16 +500,8 @@ class ChatService:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
         costs = model_capability.token_costs
-        input_cost = (input_tokens / 1_000_000) * costs.input_cost
-        output_cost = (output_tokens / 1_000_000) * costs.output_cost
+        ONE_MILLION_TOKENS = 1_000_000
+        input_cost = (input_tokens / ONE_MILLION_TOKENS) * costs.input_cost
+        output_cost = (output_tokens / ONE_MILLION_TOKENS) * costs.output_cost
         total_cost = input_cost + output_cost
         return {"input_cost": input_cost, "output_cost": output_cost, "total_cost": total_cost}
-
-
-def create_chat_service() -> ChatService:
-    """
-    Factory function to create a ChatService instance with a database session.
-    Returns:
-        ChatService instance
-    """
-    return ChatService()

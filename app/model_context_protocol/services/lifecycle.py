@@ -4,8 +4,6 @@ MCP Server Lifecycle Management Service.
 This service manages the lifecycle of MCP servers at the application level,
 ensuring servers are started once during app startup and reused across
 all chat sessions and agent interactions.
-
-Uses pydantic-ai's native lifecycle management patterns with AsyncExitStack.
 """
 
 import asyncio

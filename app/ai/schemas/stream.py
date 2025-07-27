@@ -60,24 +60,3 @@ class StreamBlock(BaseModel):
 
     # Timestamp for tracking when the block was created
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class ToolExecution(BaseModel):
-    """
-    Represents a single tool execution during chat completion
-    """
-
-    id: str
-    name: str
-    arguments: str | dict
-    result: str | dict | None = None
-    error: str | None = None
-
-
-class CompletionMetadata(BaseModel):
-    """
-    Final metadata for a chat completion
-    """
-
-    stream_blocks: list[StreamBlock] = []
-    content: str = ""
