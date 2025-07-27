@@ -15,7 +15,7 @@ from app.chat.schemas import MessageRead, MessageUpdate
 from app.chat.schemas.message import MessageCreate
 from app.chat.services import ChatMessageService
 
-router = APIRouter(prefix="/messages", tags=["Chat Messages"])
+router = APIRouter(prefix="/messages", tags=["Messages"])
 
 
 @router.post("/{session_id}/", response_model=MessageRead, status_code=status.HTTP_201_CREATED)

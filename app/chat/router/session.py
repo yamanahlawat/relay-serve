@@ -9,7 +9,7 @@ from app.chat.models import ChatSession
 from app.chat.schemas import SessionCreate, SessionRead, SessionUpdate
 from app.chat.services import ChatSessionService
 
-router = APIRouter(prefix="/sessions", tags=["Chat Sessions"])
+router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
 @router.post("/", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
