@@ -26,6 +26,8 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
     ToolCallPart,
     ToolCallPartDelta,
     UserPromptPart,
@@ -231,10 +233,11 @@ class ChatService:
 
         def collect_and_yield_block(block) -> str:
             """Helper to collect stream blocks and yield JSON"""
-            # Only store non-thinking blocks in the database
+            # Store all blocks except ephemeral UI thinking blocks
+            # reasoning blocks ARE stored (they contain actual model reasoning)
             if block.type != "thinking":
                 stream_blocks.append(block.model_dump())
-            # Yield the JSON for streaming (all blocks including thinking)
+            # Yield all blocks for streaming (thinking + reasoning + content)
             return block.model_dump_json()
 
         try:
@@ -287,7 +290,16 @@ class ChatService:
                         async with node.stream(run.ctx) as request_stream:
                             async for event in request_stream:
                                 if isinstance(event, PartStartEvent):
-                                    if isinstance(event.part, ToolCallPart):
+                                    if isinstance(event.part, ThinkingPart):
+                                        # Reasoning model thinking - capture actual model reasoning
+                                        reasoning_content = getattr(event.part, "content", "")
+                                        if reasoning_content:
+                                            reasoning_block = StreamBlockFactory.create_reasoning_block(
+                                                content=reasoning_content
+                                            )
+                                            yield collect_and_yield_block(reasoning_block)
+
+                                    elif isinstance(event.part, ToolCallPart):
                                         # Tool call starting - show thinking and tool info
                                         tool_name = getattr(event.part, "tool_name", "unknown")
                                         tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
@@ -317,7 +329,16 @@ class ChatService:
                                             ).model_dump_json()
 
                                 elif isinstance(event, PartDeltaEvent):
-                                    if isinstance(event.delta, TextPartDelta):
+                                    if isinstance(event.delta, ThinkingPartDelta):
+                                        # Streaming reasoning content as it's generated
+                                        content_delta = getattr(event.delta, "content_delta", "")
+                                        if content_delta:
+                                            reasoning_delta = StreamBlockFactory.create_reasoning_block(
+                                                content=content_delta
+                                            )
+                                            yield collect_and_yield_block(reasoning_delta)
+
+                                    elif isinstance(event.delta, TextPartDelta):
                                         # Text content delta
                                         content = event.delta.content_delta
                                         if content:
@@ -461,7 +482,7 @@ class ChatService:
                 final_block = StreamBlockFactory.create_done_block(content=final_output)
                 final_block.message = MessageRead.model_validate(created_message)
                 final_block.usage = assistant_message.usage.model_dump() if assistant_message.usage else None
-                yield final_block.model_dump_json()
+                yield collect_and_yield_block(final_block)
 
             # Update original message status to completed
             await self._update_message_status(session_id, message_id, MessageStatus.COMPLETED)

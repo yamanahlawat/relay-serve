@@ -291,7 +291,7 @@ class MCPServerLifecycleManager:
             if remaining_tasks:
                 logger.info(f"Waiting for {len(remaining_tasks)} remaining lifecycle tasks")
                 try:
-                    done, pending = await asyncio.wait(remaining_tasks, timeout=REMAINING_TASKS_TIMEOUT)
+                    _, pending = await asyncio.wait(remaining_tasks, timeout=REMAINING_TASKS_TIMEOUT)
                     if pending:
                         logger.warning(f"{len(pending)} lifecycle tasks did not complete in time")
                 except Exception as e:

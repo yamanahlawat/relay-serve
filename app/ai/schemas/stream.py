@@ -20,7 +20,8 @@ class StreamBlockType(BaseEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
 
-    THINKING = "thinking"
+    THINKING = "thinking"  # UI status indicators (fade animation, not stored)
+    REASONING = "reasoning"  # Model reasoning content (stored, static display)
     DONE = "done"
 
 
