@@ -20,7 +20,8 @@ class StreamBlockType(BaseEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
 
-    THINKING = "thinking"
+    THINKING = "thinking"  # UI status indicators (fade animation, not stored)
+    REASONING = "reasoning"  # Model reasoning content (stored, static display)
     DONE = "done"
 
 
@@ -60,24 +61,3 @@ class StreamBlock(BaseModel):
 
     # Timestamp for tracking when the block was created
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class ToolExecution(BaseModel):
-    """
-    Represents a single tool execution during chat completion
-    """
-
-    id: str
-    name: str
-    arguments: str | dict
-    result: str | dict | None = None
-    error: str | None = None
-
-
-class CompletionMetadata(BaseModel):
-    """
-    Final metadata for a chat completion
-    """
-
-    stream_blocks: list[StreamBlock] = []
-    content: str = ""

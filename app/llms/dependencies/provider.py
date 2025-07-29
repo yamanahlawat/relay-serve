@@ -6,4 +6,7 @@ from app.llms.services import LLMProviderService
 
 
 async def get_provider_service(db: AsyncSession = Depends(get_db_session)) -> LLMProviderService:
+    """
+    Get the LLM provider service instance with database dependency.
+    """
     return LLMProviderService(db=db)

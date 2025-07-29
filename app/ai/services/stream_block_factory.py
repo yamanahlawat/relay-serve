@@ -23,11 +23,28 @@ class StreamBlockFactory:
         content: str | None = None,
     ) -> StreamBlock:
         """
-        Create a thinking block to indicate processing state
+        Create a thinking block to indicate processing state (UI status, not stored)
         """
         return StreamBlock(
             type=StreamBlockType.THINKING,
             content=content or "Thinking...",
+        )
+
+    @staticmethod
+    def create_reasoning_block(
+        content: str,
+    ) -> StreamBlock:
+        """
+        Create a reasoning block from model's actual reasoning (ThinkingPart).
+        This content is stored and displayed as actual model reasoning.
+
+        Args:
+            reasoning_content: The model's reasoning text
+            is_delta: Whether this is a partial update (streaming)
+        """
+        return StreamBlock(
+            type=StreamBlockType.REASONING,
+            content=content,
         )
 
     @staticmethod

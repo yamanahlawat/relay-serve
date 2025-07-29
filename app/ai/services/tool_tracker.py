@@ -1,6 +1,6 @@
 """Tool call tracking utilities for managing streaming transparency."""
 
-from typing import Any, Dict
+from typing import Any
 
 from loguru import logger
 
@@ -13,9 +13,9 @@ class ToolCallTracker:
 
     def __init__(self) -> None:
         """Initialize the tool call tracker."""
-        self._active_tool_calls: Dict[str, Dict[str, Any]] = {}
+        self._active_tool_calls: dict[str, dict[str, Any]] = {}
         # Map part index to tool call ID for tracking tool call deltas
-        self._part_index_to_tool_call_id: Dict[int, str] = {}
+        self._part_index_to_tool_call_id: dict[int, str] = {}
 
     def start_tool_call(self, tool_call_id: str, tool_name: str, part_index: int | None = None) -> None:
         """
@@ -49,7 +49,7 @@ class ToolCallTracker:
             self._active_tool_calls[tool_call_id]["completed"] = True
             logger.debug(f"Completed tool call: {tool_call_id}")
 
-    def get_tool_info(self, tool_call_id: str) -> Dict[str, Any] | None:
+    def get_tool_info(self, tool_call_id: str) -> dict[str, Any] | None:
         """
         Get information about a tracked tool call.
 
