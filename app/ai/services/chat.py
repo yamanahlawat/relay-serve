@@ -49,6 +49,9 @@ from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
 from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
+# Constants
+ONE_MILLION_TOKENS = 1_000_000
+
 
 class ChatService:
     """
@@ -519,7 +522,6 @@ class ChatService:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
         costs = model_capability.token_costs
-        ONE_MILLION_TOKENS = 1_000_000
         input_cost = (input_tokens / ONE_MILLION_TOKENS) * costs.input_cost
         output_cost = (output_tokens / ONE_MILLION_TOKENS) * costs.output_cost
         total_cost = input_cost + output_cost

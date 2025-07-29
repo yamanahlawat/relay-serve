@@ -21,6 +21,7 @@ from app.model_context_protocol.utils import create_server_instance_from_db
 SERVER_STOP_TIMEOUT = 5.0
 APPLICATION_SHUTDOWN_TIMEOUT = 10.0
 REMAINING_TASKS_TIMEOUT = 3.0
+SERVER_INIT_TIMEOUT = 30.0
 
 
 class MCPServerLifecycleManager:
@@ -54,13 +55,13 @@ class MCPServerLifecycleManager:
         Returns:
             True if started successfully, False otherwise
         """
+        # Check if server already exists and stop it first (outside the lock to avoid deadlock)
+        if server_name in self._lifecycle_tasks:
+            logger.info(f"Server '{server_name}' already exists, restarting it")
+            await self.stop_server(server_name)
+
         # Setup phase - acquire lock only for state modification
         async with self._lock:
-            # If a server with this name already exists, shut it down first
-            if server_name in self._lifecycle_tasks:
-                logger.info(f"Server '{server_name}' already exists, restarting it")
-                await self.stop_server(server_name)
-
             # Create initialization coordination events
             init_event = asyncio.Event()
             self._init_events[server_name] = init_event
@@ -79,7 +80,7 @@ class MCPServerLifecycleManager:
 
         # Wait for initialization outside the lock to avoid blocking other operations
         try:
-            await init_event.wait()
+            await asyncio.wait_for(init_event.wait(), timeout=SERVER_INIT_TIMEOUT)
 
             # Check if initialization was successful
             success = self._init_results.get(server_name, False)
@@ -139,11 +140,12 @@ class MCPServerLifecycleManager:
 
     async def _cleanup_server_resources(self, server_name: str) -> None:
         """Clean up all resources associated with a server."""
-        self._lifecycle_tasks.pop(server_name, None)
-        self._servers.pop(server_name, None)
-        self._shutdown_events.pop(server_name, None)
-        self._init_events.pop(server_name, None)
-        self._init_results.pop(server_name, None)
+        async with self._lock:
+            self._lifecycle_tasks.pop(server_name, None)
+            self._servers.pop(server_name, None)
+            self._shutdown_events.pop(server_name, None)
+            self._init_events.pop(server_name, None)
+            self._init_results.pop(server_name, None)
 
     async def stop_server(self, server_name: str) -> bool:
         """
