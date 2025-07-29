@@ -11,7 +11,7 @@ from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
+async def lifespan(_: FastAPI) -> AsyncGenerator:
     """
     Context manager to handle the lifespan of the application.
     """

@@ -2,10 +2,9 @@
 
 from pydantic_ai.models.gemini import GeminiModel
 
+from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-
-from .base import ProviderBuilder
 
 
 class GeminiProviderBuilder(ProviderBuilder):

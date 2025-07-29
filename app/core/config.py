@@ -90,9 +90,6 @@ class Settings(BaseSettings):
     STORAGE_PROVIDER: StorageProvider = StorageProvider.LOCAL
     FILE_STORAGE_PATH: Path = Path("/uploads")
 
-    # Search
-    TAVILY_SEARCH_API_KEY: SecretStr | None = None
-
     # Logfire
     LOGFIRE_TOKEN: SecretStr | None = None
 

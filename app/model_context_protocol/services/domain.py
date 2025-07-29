@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from loguru import logger
-from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model_context_protocol.crud.server import crud_mcp_server
@@ -179,15 +178,6 @@ class MCPServerDomainService:
 
         # Delete the server from database
         await crud_mcp_server.delete(db=self.db, id=server_id)
-
-    async def get_running_servers_for_agent(self) -> list[MCPServerStdio | MCPServerStreamableHTTP]:
-        """
-        Get pre-started MCP servers from the lifecycle manager for agent use.
-
-        Returns:
-            List of running MCP server instances ready for agent use
-        """
-        return await mcp_lifecycle_manager.get_running_servers()
 
     async def _handle_server_lifecycle_change(self, updated_server):
         """Handle individual server lifecycle changes efficiently."""

@@ -4,11 +4,10 @@ MCP Server Lifecycle Management Service.
 This service manages the lifecycle of MCP servers at the application level,
 ensuring servers are started once during app startup and reused across
 all chat sessions and agent interactions.
-
-Uses pydantic-ai's native lifecycle management patterns with AsyncExitStack.
 """
 
 import asyncio
+from contextlib import AsyncExitStack
 
 from loguru import logger
 from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP
@@ -18,27 +17,36 @@ from app.model_context_protocol.crud.server import crud_mcp_server
 from app.model_context_protocol.models.server import MCPServer
 from app.model_context_protocol.utils import create_server_instance_from_db
 
+# Timeout constants for consistent behavior
+SERVER_STOP_TIMEOUT = 5.0
+APPLICATION_SHUTDOWN_TIMEOUT = 10.0
+REMAINING_TASKS_TIMEOUT = 3.0
+SERVER_INIT_TIMEOUT = 30.0
+
 
 class MCPServerLifecycleManager:
     """
-    Manages the lifecycle of individual MCP servers using pydantic-ai's native patterns.
+    Manages the lifecycle of individual MCP servers using dedicated tasks and AsyncExitStack.
 
     This singleton service:
     - Manages servers individually for granular control
-    - Uses AsyncExitStack per server for proper resource management
-    - Leverages pydantic-ai's built-in reference counting
-    - Handles graceful startup and shutdown
+    - Uses individual lifecycle tasks per server to prevent task crossing issues
+    - Each task owns its own AsyncExitStack for proper resource management
+    - Handles graceful startup and shutdown following MCP 2025 best practices
     """
 
     def __init__(self) -> None:
         """Initialize the lifecycle manager."""
         self._servers: dict[str, MCPServerStdio | MCPServerStreamableHTTP] = {}
-        self._server_tasks: dict[str, asyncio.Task] = {}
+        self._lifecycle_tasks: dict[str, asyncio.Task] = {}
+        self._shutdown_events: dict[str, asyncio.Event] = {}
+        self._init_events: dict[str, asyncio.Event] = {}
+        self._init_results: dict[str, bool] = {}
         self._lock = asyncio.Lock()
 
     async def start_server(self, server_name: str, server_instance: MCPServerStdio | MCPServerStreamableHTTP) -> bool:
         """
-        Start an individual MCP server.
+        Start an individual MCP server using dedicated lifecycle task.
 
         Args:
             server_name: Name identifier for the server
@@ -47,39 +55,101 @@ class MCPServerLifecycleManager:
         Returns:
             True if started successfully, False otherwise
         """
+        # Check if server already exists and stop it first (outside the lock to avoid deadlock)
+        if server_name in self._lifecycle_tasks:
+            logger.info(f"Server '{server_name}' already exists, restarting it")
+            await self.stop_server(server_name)
+
+        # Setup phase - acquire lock only for state modification
         async with self._lock:
-            if server_name in self._servers:
-                logger.warning(f"Server '{server_name}' is already running")
-                return True
+            # Create initialization coordination events
+            init_event = asyncio.Event()
+            self._init_events[server_name] = init_event
+            self._init_results[server_name] = False
 
-            try:
-                # Create a task to manage the server lifecycle
-                async def server_task():
-                    async with server_instance:
-                        # Keep the server running until task is cancelled
-                        try:
-                            while True:
-                                await asyncio.sleep(1)
-                        except asyncio.CancelledError:
-                            logger.debug(f"Server task for '{server_name}' cancelled")
-                            raise
+            # Create shutdown signal event
+            shutdown_event = asyncio.Event()
+            self._shutdown_events[server_name] = shutdown_event
 
-                task = asyncio.create_task(server_task(), name=f"mcp_server_{server_name}")
+            # Start a dedicated task to manage the server's lifecycle
+            server_task = asyncio.create_task(
+                self._server_lifecycle_task(server_name, server_instance, init_event, shutdown_event),
+                name=f"mcp_server_{server_name}",
+            )
+            self._lifecycle_tasks[server_name] = server_task
 
-                # Store the server and its task
-                self._servers[server_name] = server_instance
-                self._server_tasks[server_name] = task
+        # Wait for initialization outside the lock to avoid blocking other operations
+        try:
+            await asyncio.wait_for(init_event.wait(), timeout=SERVER_INIT_TIMEOUT)
 
+            # Check if initialization was successful
+            success = self._init_results.get(server_name, False)
+            if success:
                 logger.info(f"Started MCP server: {server_name}")
                 return True
+            else:
+                logger.error(f"Failed to initialize MCP server: {server_name}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to start MCP server '{server_name}': {e}")
+            # Clean up any partial initialization
+            await self._cleanup_server_resources(server_name)
+            return False
+
+    async def _server_lifecycle_task(
+        self,
+        server_name: str,
+        server_instance: MCPServerStdio | MCPServerStreamableHTTP,
+        init_event: asyncio.Event,
+        shutdown_event: asyncio.Event,
+    ) -> None:
+        """
+        Task that manages the entire lifecycle of a server within a single task context.
+        This prevents task crossing issues by ensuring the task that creates the context also disposes of it.
+        """
+        # This task exclusively owns the AsyncExitStack for this server
+        async with AsyncExitStack() as server_context:
+            try:
+                # Enter the server instance into the context
+                await server_context.enter_async_context(server_instance)
+
+                # Store server for access
+                self._servers[server_name] = server_instance
+
+                # Signal initialization success
+                self._init_results[server_name] = True
+                init_event.set()
+
+                logger.info(f"MCP server {server_name} lifecycle task started successfully")
+
+                # Wait for shutdown signal
+                await shutdown_event.wait()
+                logger.info(f"Server {server_name} lifecycle task completing, context will be properly closed")
 
             except Exception as e:
-                logger.error(f"Failed to start MCP server '{server_name}': {e}")
-                return False
+                # Signal initialization failure if init hasn't been set yet
+                logger.exception(f"Error in server lifecycle for {server_name}: {e}")
+                self._init_results[server_name] = False
+                if not init_event.is_set():
+                    init_event.set()  # Signal that initialization is done (but failed)
+
+            finally:
+                # Clean up tracking dictionaries
+                await self._cleanup_server_resources(server_name)
+
+    async def _cleanup_server_resources(self, server_name: str) -> None:
+        """Clean up all resources associated with a server."""
+        async with self._lock:
+            self._lifecycle_tasks.pop(server_name, None)
+            self._servers.pop(server_name, None)
+            self._shutdown_events.pop(server_name, None)
+            self._init_events.pop(server_name, None)
+            self._init_results.pop(server_name, None)
 
     async def stop_server(self, server_name: str) -> bool:
         """
-        Stop an individual MCP server.
+        Stop an individual MCP server by signaling its lifecycle task.
 
         Args:
             server_name: Name identifier for the server to stop
@@ -87,37 +157,35 @@ class MCPServerLifecycleManager:
         Returns:
             True if stopped successfully, False if not found
         """
+        # Get shutdown event while holding lock to prevent race conditions
         async with self._lock:
-            if server_name not in self._servers:
-                # Server already stopped - this is fine, return success
+            shutdown_event = self._shutdown_events.get(server_name)
+            if not shutdown_event:
                 return True
 
-            try:
-                # Cancel the server task
-                task = self._server_tasks[server_name]
-                task.cancel()
+        try:
+            # Signal the lifecycle task to exit, which will properly close the context
+            shutdown_event.set()
 
-                # Wait for task to complete cancellation with timeout
+            # Get the lifecycle task
+            lifecycle_task = self._lifecycle_tasks.get(server_name)
+
+            if lifecycle_task:
+                # Wait for the lifecycle task to complete
                 try:
-                    await asyncio.wait_for(task, timeout=2.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass  # Expected when we cancel the task or it times out
+                    await asyncio.wait_for(lifecycle_task, timeout=SERVER_STOP_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timed out waiting for lifecycle task of {server_name} to complete")
+                except asyncio.CancelledError:
+                    logger.warning(f"Server shutdown for {server_name} was cancelled")
 
-                # Remove from tracking
-                del self._servers[server_name]
-                del self._server_tasks[server_name]
-
-                logger.info(f"Stopped MCP server: {server_name}")
-                return True
-
-            except Exception as e:
-                logger.error(f"Failed to stop MCP server '{server_name}': {e}")
-                # Clean up tracking even if stop failed
-                if server_name in self._servers:
-                    del self._servers[server_name]
-                if server_name in self._server_tasks:
-                    del self._server_tasks[server_name]
-                return False
+            logger.info(f"Stopped MCP server: {server_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to stop MCP server '{server_name}': {e}")
+            # Clean up tracking even if stop failed
+            await self._cleanup_server_resources(server_name)
+            return False
 
     async def restart_server(self, server_name: str, server_instance: MCPServerStdio | MCPServerStreamableHTTP) -> bool:
         """
@@ -193,34 +261,53 @@ class MCPServerLifecycleManager:
 
     async def shutdown(self) -> None:
         """
-        Shutdown all running MCP servers (used at app shutdown).
+        Gracefully shutdown all running MCP servers by signaling their lifecycle tasks.
         """
         try:
-            async with self._lock:
-                if not self._servers:
-                    logger.debug("No MCP servers running, nothing to shutdown")
-                    return
+            if not self._servers:
+                logger.debug("No MCP servers running, nothing to shutdown")
+                return
 
-                logger.info(f"Shutting down {len(self._servers)} MCP servers...")
+            logger.info(f"Shutting down {len(self._servers)} MCP servers...")
 
-                # Stop each server individually with timeout
-                server_names = list(self._servers.keys())
-                for server_name in server_names:
-                    try:
-                        await asyncio.wait_for(self.stop_server(server_name), timeout=3.0)
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Timeout stopping server '{server_name}', forcing cleanup")
-                        # Force cleanup if timeout
-                        if server_name in self._servers:
-                            del self._servers[server_name]
-                        if server_name in self._server_tasks:
-                            del self._server_tasks[server_name]
-                    except Exception as e:
-                        logger.error(f"Error stopping server '{server_name}': {e}")
+            # Signal all servers to shutdown concurrently
+            server_names = list(self._servers.keys())
+            shutdown_tasks = []
 
-                logger.info("All MCP servers have been shut down")
+            for server_name in server_names:
+                shutdown_task = asyncio.create_task(self.stop_server(server_name), name=f"shutdown_{server_name}")
+                shutdown_tasks.append(shutdown_task)
+
+            try:
+                # Wait for all servers to shutdown with timeout
+                await asyncio.wait_for(
+                    asyncio.gather(*shutdown_tasks, return_exceptions=True), timeout=APPLICATION_SHUTDOWN_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Timeout during graceful shutdown, forcing cleanup")
+            except Exception as e:
+                logger.error(f"Error during graceful shutdown: {e}")
+
+            # Force cleanup any remaining tracking
+            remaining_tasks = list(self._lifecycle_tasks.values())
+            if remaining_tasks:
+                logger.info(f"Waiting for {len(remaining_tasks)} remaining lifecycle tasks")
+                try:
+                    _, pending = await asyncio.wait(remaining_tasks, timeout=REMAINING_TASKS_TIMEOUT)
+                    if pending:
+                        logger.warning(f"{len(pending)} lifecycle tasks did not complete in time")
+                except Exception as e:
+                    logger.error(f"Error waiting for remaining tasks: {e}")
+
+            # Clear all tracking
+            self._servers.clear()
+            self._lifecycle_tasks.clear()
+            self._shutdown_events.clear()
+            self._init_events.clear()
+            self._init_results.clear()
+
+            logger.info("All MCP servers have been shut down")
         except asyncio.CancelledError:
-            # Handle graceful shutdown cancellation
             logger.info("MCP server shutdown was cancelled")
             raise
 

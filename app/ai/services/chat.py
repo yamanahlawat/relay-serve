@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
@@ -25,6 +26,8 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
     ToolCallPart,
     ToolCallPartDelta,
     UserPromptPart,
@@ -44,7 +47,10 @@ from app.database.session import AsyncSessionLocal
 from app.files.storage.utils import get_attachment_download_url
 from app.llms.models.model import LLMModel
 from app.llms.models.provider import LLMProvider
-from app.model_context_protocol.services.domain import MCPServerDomainService
+from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
+
+# Constants
+ONE_MILLION_TOKENS = 1_000_000
 
 
 class ChatService:
@@ -71,16 +77,10 @@ class ChatService:
         system_prompt: str | None = None,
         tools: list[Any] | None = None,
     ) -> Agent:
-        """Create a fresh agent for the provider with MCP tools."""
-        # Get MCP servers
-        try:
-            async with AsyncSessionLocal() as db:
-                mcp_service = MCPServerDomainService(db=db)
-                mcp_servers = await mcp_service.get_running_servers_for_agent()
-                logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
-        except Exception as e:
-            logger.warning(f"Failed to get MCP servers: {e}")
-            mcp_servers = []
+        """Create an agent for the provider with MCP tools."""
+        # Get MCP servers directly from lifecycle manager
+        mcp_servers = await mcp_lifecycle_manager.get_running_servers()
+        logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
 
         return ProviderFactory.create_agent(
             provider=provider,
@@ -236,10 +236,11 @@ class ChatService:
 
         def collect_and_yield_block(block) -> str:
             """Helper to collect stream blocks and yield JSON"""
-            # Only store non-thinking blocks in the database
+            # Store all blocks except ephemeral UI thinking blocks
+            # reasoning blocks ARE stored (they contain actual model reasoning)
             if block.type != "thinking":
                 stream_blocks.append(block.model_dump())
-            # Yield the JSON for streaming (all blocks including thinking)
+            # Yield all blocks for streaming (thinking + reasoning + content)
             return block.model_dump_json()
 
         try:
@@ -251,14 +252,18 @@ class ChatService:
                     raise ValueError(f"Message {message_id} not found or has no content")
 
             # Update message status to processing
-            await self._update_message_status(session_id, message_id, MessageStatus.PROCESSING)
+            await self._update_message_status(
+                session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
+            )
 
             # Create agent
             agent = await self._create_agent(provider=provider, model=model, system_prompt=system_prompt, tools=tools)
 
             # Prepare message history and model settings
-            message_history = await self._prepare_message_history(session_id, current_message)
-            model_settings = self._prepare_model_settings(model, temperature, max_tokens)
+            message_history = await self._prepare_message_history(
+                session_id=session_id, current_message=current_message
+            )
+            model_settings = self._prepare_model_settings(model=model, temperature=temperature, max_tokens=max_tokens)
 
             # Prepare user prompt with attachments
             attachment_messages = await self._convert_attachments_to_pydantic(current_message)
@@ -288,7 +293,16 @@ class ChatService:
                         async with node.stream(run.ctx) as request_stream:
                             async for event in request_stream:
                                 if isinstance(event, PartStartEvent):
-                                    if isinstance(event.part, ToolCallPart):
+                                    if isinstance(event.part, ThinkingPart):
+                                        # Reasoning model thinking - capture actual model reasoning
+                                        reasoning_content = getattr(event.part, "content", "")
+                                        if reasoning_content:
+                                            reasoning_block = StreamBlockFactory.create_reasoning_block(
+                                                content=reasoning_content
+                                            )
+                                            yield collect_and_yield_block(reasoning_block)
+
+                                    elif isinstance(event.part, ToolCallPart):
                                         # Tool call starting - show thinking and tool info
                                         tool_name = getattr(event.part, "tool_name", "unknown")
                                         tool_call_id = getattr(event.part, "tool_call_id", f"part_{event.index}")
@@ -318,7 +332,16 @@ class ChatService:
                                             ).model_dump_json()
 
                                 elif isinstance(event, PartDeltaEvent):
-                                    if isinstance(event.delta, TextPartDelta):
+                                    if isinstance(event.delta, ThinkingPartDelta):
+                                        # Streaming reasoning content as it's generated
+                                        content_delta = getattr(event.delta, "content_delta", "")
+                                        if content_delta:
+                                            reasoning_delta = StreamBlockFactory.create_reasoning_block(
+                                                content=content_delta
+                                            )
+                                            yield collect_and_yield_block(reasoning_delta)
+
+                                    elif isinstance(event.delta, TextPartDelta):
                                         # Text content delta
                                         content = event.delta.content_delta
                                         if content:
@@ -420,9 +443,6 @@ class ChatService:
                         if run.result and run.result.output:
                             assert run.result.output == node.data.output
 
-            # Clean up tool tracker state after streaming completes
-            tool_tracker.reset()
-
             # Save AI response to database after streaming completes
             final_output = run.result.output if run.result else None
             if final_output and str(final_output).strip():
@@ -465,12 +485,10 @@ class ChatService:
                 final_block = StreamBlockFactory.create_done_block(content=final_output)
                 final_block.message = MessageRead.model_validate(created_message)
                 final_block.usage = assistant_message.usage.model_dump() if assistant_message.usage else None
-                yield final_block.model_dump_json()
+                yield collect_and_yield_block(final_block)
 
             # Update original message status to completed
-            await self._update_message_status(
-                session_id, message_id, MessageStatus.COMPLETED, {"processing_complete": True}
-            )
+            await self._update_message_status(session_id, message_id, MessageStatus.COMPLETED)
         except ValidationError as error:
             logger.error(f"Validation error in stream_response: {error}")
             raise ValueError(f"Invalid input data: {error}") from error
@@ -481,15 +499,15 @@ class ChatService:
             logger.error(f"AI error in stream_response: {error}")
             raise
         finally:
-            # Clean up tool tracker and update message status on error
+            # Clean up tool tracker state after streaming completes
             if "tool_tracker" in locals():
                 tool_tracker.reset()
 
             # Update message status to failed if we're in an exception context
-            import sys
-
             if sys.exc_info()[0] is not None:
-                await self._update_message_status(session_id, message_id, MessageStatus.FAILED)
+                await self._update_message_status(
+                    session_id=session_id, message_id=message_id, status=MessageStatus.FAILED
+                )
 
     def _calculate_cost(self, model: LLMModel, input_tokens: int, output_tokens: int) -> dict[str, float]:
         """
@@ -504,16 +522,7 @@ class ChatService:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
         costs = model_capability.token_costs
-        input_cost = (input_tokens / 1_000_000) * costs.input_cost
-        output_cost = (output_tokens / 1_000_000) * costs.output_cost
+        input_cost = (input_tokens / ONE_MILLION_TOKENS) * costs.input_cost
+        output_cost = (output_tokens / ONE_MILLION_TOKENS) * costs.output_cost
         total_cost = input_cost + output_cost
         return {"input_cost": input_cost, "output_cost": output_cost, "total_cost": total_cost}
-
-
-def create_chat_service() -> ChatService:
-    """
-    Factory function to create a ChatService instance with a database session.
-    Returns:
-        ChatService instance
-    """
-    return ChatService()

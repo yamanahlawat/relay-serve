@@ -1,6 +1,5 @@
 import io
 
-import pybase64
 from fastapi import HTTPException, UploadFile
 from PIL import Image, ImageOps
 
@@ -25,20 +24,6 @@ class ImageProcessor:
         output = io.BytesIO()
         image.save(output, format=fmt, quality=quality, optimize=True, progressive=True)
         return output.getvalue()
-
-    @classmethod
-    def encode_image_to_base64(cls, image_path: str) -> str:
-        """
-        Encode an image file to base64 using pybase64 if available.
-        Args:
-            image_path (str): Path to the image file.
-        Returns:
-            str: Base64 encoded string of the image.
-        """
-        with open(image_path, "rb") as image_file:
-            image_bytes = image_file.read()
-            encoded_bytes = pybase64.b64encode(image_bytes)
-            return encoded_bytes.decode("utf-8")
 
     @staticmethod
     async def process_image(file: UploadFile, limits: ImageLimits) -> UploadFile:
