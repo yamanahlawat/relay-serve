@@ -133,3 +133,6 @@ dmypy.json
 server
 
 neo4j_auth.txt
+
+
+node_modules/
