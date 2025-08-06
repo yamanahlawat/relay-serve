@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from loguru import logger
 from pydantic_ai import Agent
 
 from app.llms.models.model import LLMModel
@@ -30,9 +31,8 @@ class ProviderBuilder(ABC):
         self,
         provider: LLMProvider,
         model: LLMModel,
+        toolsets: list,
         system_prompt: str | None = None,
-        tools: list[Any] | None = None,
-        mcp_servers: list[Any] | None = None,
     ) -> Agent:
         """
         Build a pydantic-ai agent for the given provider and model.
@@ -44,24 +44,18 @@ class ProviderBuilder(ABC):
             provider: The LLM provider instance
             model: The LLM model instance
             system_prompt: Optional system prompt for the agent
-            tools: Optional list of tools for the agent
-            mcp_servers: Optional list of MCP servers for the agent
-
         Returns:
             Configured pydantic-ai Agent instance
         """
         pydantic_model = self.build_model(provider, model)
 
-        agent_kwargs = {
-            "model": pydantic_model,
-            "tools": tools or [],
-        }
+        agent_kwargs = {"model": pydantic_model, "name": "Relay Agent"}
 
-        if mcp_servers:
-            agent_kwargs["mcp_servers"] = mcp_servers
+        if toolsets:
+            agent_kwargs["toolsets"] = toolsets
 
-        if system_prompt is not None:
-            agent_kwargs["name"] = "Relay Agent"
+        if system_prompt:
             agent_kwargs["instructions"] = system_prompt
 
+        logger.info(f"Creating agent with kwargs: {agent_kwargs}")
         return Agent(**agent_kwargs)

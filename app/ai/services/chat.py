@@ -74,20 +74,15 @@ class ChatService:
         self,
         provider: LLMProvider,
         model: LLMModel,
+        toolsets: list,
         system_prompt: str | None = None,
-        tools: list[Any] | None = None,
     ) -> Agent:
         """Create an agent for the provider with MCP tools."""
-        # Get MCP servers directly from lifecycle manager
-        mcp_servers = await mcp_lifecycle_manager.get_running_servers()
-        logger.debug(f"Retrieved {len(mcp_servers)} running MCP servers for agent")
-
         return ProviderFactory.create_agent(
             provider=provider,
             model=model,
             system_prompt=system_prompt,
-            tools=tools,
-            mcp_servers=mcp_servers or None,
+            toolsets=toolsets,
         )
 
     async def _convert_attachments_to_pydantic(
@@ -209,19 +204,17 @@ class ChatService:
         session_id: UUID,
         message_id: UUID,
         system_prompt: str | None = None,
-        tools: list[Any] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """
-        Stream a response for an existing message using pydantic_ai with Claude-like transparency.
+        Stream a response for an existing message using pydantic_ai.
         Args:
             provider: LLM provider to use
             model: LLM model to use
             session_id: UUID of the chat session
             message_id: UUID of existing message to complete
             system_prompt: Optional system prompt override
-            tools: Optional tools for the agent
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
         Yields:
@@ -256,8 +249,17 @@ class ChatService:
                 session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
             )
 
+            # Get MCP servers directly from lifecycle manager
+            toolsets = await mcp_lifecycle_manager.get_running_servers()
+            logger.debug(f"Retrieved {len(toolsets)} running MCP servers for agent")
+
             # Create agent
-            agent = await self._create_agent(provider=provider, model=model, system_prompt=system_prompt, tools=tools)
+            agent = await self._create_agent(
+                provider=provider,
+                model=model,
+                system_prompt=system_prompt,
+                toolsets=toolsets,
+            )
 
             # Prepare message history and model settings
             message_history = await self._prepare_message_history(

@@ -102,7 +102,7 @@ class MCPServerDomainService:
             status=status,
         )
 
-    async def update_server(self, server_id: UUID, update_data: MCPServerUpdate) -> MCPServerResponse:
+    async def update_server(self, server_id: UUID, model_in: MCPServerUpdate) -> MCPServerResponse:
         """
         Update an existing MCP server configuration.
 
@@ -111,7 +111,7 @@ class MCPServerDomainService:
 
         Args:
             server_id: UUID of the server to update
-            update_data: Server configuration update data
+            model_in: Server configuration update data
 
         Returns:
             MCPServerResponse with updated server data and status (no tools - lazy loaded)
@@ -125,7 +125,7 @@ class MCPServerDomainService:
             raise MCPServerError("Server not found")
 
         # Update the server in database
-        updated = await crud_mcp_server.update(db=self.db, id=server_id, obj_in=update_data)
+        updated = await crud_mcp_server.update(db=self.db, id=server_id, obj_in=model_in)
 
         if not updated:
             raise MCPServerError(f"Server with ID {server_id} not found")
