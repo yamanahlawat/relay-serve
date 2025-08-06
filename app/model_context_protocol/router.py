@@ -79,7 +79,7 @@ async def update_mcp_server(
     - **400**: Server validation failed
     """
     try:
-        return await service.update_server(server_id, server)
+        return await service.update_server(server_id=server_id, model_in=server)
     except MCPServerError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
 
