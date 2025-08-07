@@ -84,9 +84,8 @@ class ProviderFactory:
         cls,
         provider: LLMProvider,
         model: LLMModel,
+        toolsets: list,
         system_prompt: str | None = None,
-        tools: list[Any] | None = None,
-        mcp_servers: list[Any] | None = None,
     ) -> Agent:
         """
         Create a pydantic-ai agent from provider and model configuration.
@@ -94,8 +93,6 @@ class ProviderFactory:
             provider: The LLM provider instance
             model: The LLM model instance
             system_prompt: Optional system prompt for the agent
-            tools: Optional list of tools for the agent
-            mcp_servers: Optional list of MCP servers for the agent
         Returns:
             Configured pydantic-ai Agent instance
         Raises:
@@ -103,5 +100,8 @@ class ProviderFactory:
         """
         builder = cls.get_builder(provider.type)
         return builder.build_agent(
-            provider=provider, model=model, system_prompt=system_prompt, tools=tools, mcp_servers=mcp_servers
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            toolsets=toolsets,
         )
