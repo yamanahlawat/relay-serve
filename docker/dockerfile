@@ -82,10 +82,8 @@ RUN apt-get update \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
-
 # Install deno
 RUN npm install -g deno 
-
 
 # Copy the installed Python environment (packages) from the builder stage
 COPY --from=builder /usr/local /usr/local

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai.services.sse import get_sse_manager
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.logfire import configure_logfire
 from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
 
 
@@ -47,17 +48,7 @@ if settings.ALLOWED_CORS_ORIGINS:
 relay.include_router(router=api_router, prefix=settings.API_URL)
 
 
-# Initialize Sentry if DSN is provided
-if settings.SENTRY_DSN:
-    from app.core.sentry import init_sentry
-
-    # Initialize Sentry
-    init_sentry()
-
-
 # Configure Logfire if token is provided
 if settings.LOGFIRE_TOKEN:
-    from app.core.logfire import configure_logfire
-
     # Configure Logfire
-    configure_logfire()
+    configure_logfire(app=relay)

@@ -75,6 +75,7 @@ async def stream_completion(
             system_prompt=session.system_context,
             temperature=params.temperature,
             max_tokens=params.max_tokens,
+            top_p=params.top_p,
         ):
             yield chunk
 

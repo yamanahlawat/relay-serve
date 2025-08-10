@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
 
-from llm_registry import CapabilityRegistry
+from llm_registry import CapabilityRegistry, ModelCapabilities
 from llm_registry.exceptions import ModelNotFoundError
 from loguru import logger
 from pydantic import ValidationError
@@ -155,7 +155,12 @@ class ChatService:
             return []
 
     def _prepare_model_settings(
-        self, model: LLMModel, temperature: float | None, max_tokens: int | None
+        self,
+        model: LLMModel,
+        temperature: float | None,
+        max_tokens: int | None,
+        top_p: float | None = None,
+        model_capability: ModelCapabilities | None = None,
     ) -> ModelSettings | None:
         """
         Prepare model settings from parameters and defaults.
@@ -163,16 +168,28 @@ class ChatService:
         settings_dict = {}
 
         # Set temperature
-        if temperature is not None:
+        if model_capability and not model_capability.api_params.temperature:
+            logger.warning(f"Model {model.name} does not support temperature parameter, ignoring temperature setting")
+        elif temperature is not None:
             settings_dict["temperature"] = temperature
         elif model.default_temperature is not None:
             settings_dict["temperature"] = model.default_temperature
 
         # Set max tokens
-        if max_tokens is not None:
+        if model_capability and not model_capability.api_params.max_tokens:
+            logger.warning(f"Model {model.name} does not support max_tokens parameter, ignoring max_tokens setting")
+        elif max_tokens is not None:
             settings_dict["max_tokens"] = max_tokens
         elif model.default_max_tokens is not None:
             settings_dict["max_tokens"] = model.default_max_tokens
+
+        # Set top_p
+        if model_capability and not model_capability.api_params.top_p:
+            logger.warning(f"Model {model.name} does not support top_p parameter, ignoring top_p setting")
+        elif top_p is not None:
+            settings_dict["top_p"] = top_p
+        elif model.default_top_p is not None:
+            settings_dict["top_p"] = model.default_top_p
 
         return ModelSettings(**settings_dict) if settings_dict else None
 
@@ -206,6 +223,7 @@ class ChatService:
         system_prompt: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        top_p: float | None = None,
     ) -> AsyncIterator[str]:
         """
         Stream a response for an existing message using pydantic_ai.
@@ -217,6 +235,7 @@ class ChatService:
             system_prompt: Optional system prompt override
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
+            top_p: Optional top_p override
         Yields:
             JSON-serialized StreamBlock objects containing rich streaming information
         Raises:
@@ -265,7 +284,22 @@ class ChatService:
             message_history = await self._prepare_message_history(
                 session_id=session_id, current_message=current_message
             )
-            model_settings = self._prepare_model_settings(model=model, temperature=temperature, max_tokens=max_tokens)
+
+            # Get Model Capability from registry
+            try:
+                model_capability = self.model_registry.get_model(model_id=model.name)
+            except ModelNotFoundError:
+                logger.warning(f"Model {model.name} not found in registry, using default settings")
+                model_capability = None
+
+            # Prepare model settings
+            model_settings = self._prepare_model_settings(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=top_p,
+                model_capability=model_capability,
+            )
 
             # Prepare user prompt with attachments
             attachment_messages = await self._convert_attachments_to_pydantic(current_message)
@@ -467,6 +501,7 @@ class ChatService:
                         model=model,
                         input_tokens=getattr(usage_data, "request_tokens", 0),
                         output_tokens=getattr(usage_data, "response_tokens", 0),
+                        model_capability=model_capability,
                     )
                     assistant_message.usage = MessageUsage(
                         input_tokens=getattr(usage_data, "request_tokens", 0),
@@ -511,15 +546,12 @@ class ChatService:
                     session_id=session_id, message_id=message_id, status=MessageStatus.FAILED
                 )
 
-    def _calculate_cost(self, model: LLMModel, input_tokens: int, output_tokens: int) -> dict[str, float]:
+    def _calculate_cost(
+        self, model: LLMModel, input_tokens: int, output_tokens: int, model_capability: ModelCapabilities | None = None
+    ) -> dict[str, float]:
         """
         Calculate input, output, and total costs based on model pricing.
         """
-        try:
-            model_capability = self.model_registry.get_model(model_id=model.name)
-        except ModelNotFoundError:
-            model_capability = None
-
         if not model_capability or not model_capability.token_costs:
             logger.warning(f"Model {model.name} does not have token costs defined")
             return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}

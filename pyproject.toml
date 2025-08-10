@@ -10,24 +10,23 @@ dependencies = [
     "fastapi[standard]>=0.116.1",
     "pydantic-settings>=2.10.1",
     "sqlalchemy>=2.0.42",
-    "greenlet>=3.2.3",
+    "greenlet>=3.2.4",
     "loguru>=0.7.3",
-    "sentry-sdk[fastapi,sqlalchemy]>=2.34.1",
-    "redis[hiredis]>=6.2.0",
+    "redis[hiredis]>=6.4.0",
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
-    "mcp[cli]>=1.12.3",
-    "llm-registry>=0.4.0",
+    "mcp[cli]>=1.12.4",
+    "llm-registry>=0.4.1",
     "alembic-postgresql-enum>=1.8.0",
-    "pydantic-ai[logfire]>=0.4.11",
-    "pydantic>=2.11.7",
+    "pydantic-ai[logfire]>=0.6.2",
+    "logfire[fastapi]>=4.2.0",
 ]
 
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
-    "pre-commit>=4.2.0",
-    "ruff>=0.12.7",
+    "pre-commit>=4.3.0",
+    "ruff>=0.12.8",
     "tomli-w>=1.2.0",
 ]

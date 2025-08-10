@@ -1,9 +1,10 @@
 import logfire
+from fastapi import FastAPI
 
 from app.core.config import settings
 
 
-def configure_logfire() -> None:
+def configure_logfire(app: FastAPI) -> None:
     """
     Configures Logfire for the application.
     """
@@ -13,4 +14,5 @@ def configure_logfire() -> None:
     )
     logfire.instrument_pydantic_ai()
     logfire.instrument_mcp()
+    logfire.instrument_fastapi(app=app)
     # Add any additional Logfire configurations here

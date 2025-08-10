@@ -76,10 +76,6 @@ class Settings(BaseSettings):
     # List of allowed CORS origins
     ALLOWED_CORS_ORIGINS: list[HttpUrl] = []
 
-    # Sentry Configuration
-    SENTRY_DSN: HttpUrl | None = None
-    SENTRY_AUTH_TOKEN: SecretStr | None = None
-
     # Database Settings
     DATABASE: DatabaseSettings
 
