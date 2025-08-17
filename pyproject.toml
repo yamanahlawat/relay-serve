@@ -16,17 +16,17 @@ dependencies = [
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
-    "mcp[cli]>=1.12.4",
+    "mcp[cli]>=1.13.0",
     "llm-registry>=0.4.1",
     "alembic-postgresql-enum>=1.8.0",
-    "pydantic-ai[logfire]>=0.6.2",
-    "logfire[fastapi]>=4.3.0",
+    "pydantic-ai[logfire]>=0.7.2",
+    "logfire[fastapi]>=4.3.3",
 ]
 
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
     "pre-commit>=4.3.0",
-    "ruff>=0.12.8",
+    "ruff>=0.12.9",
     "tomli-w>=1.2.0",
 ]
