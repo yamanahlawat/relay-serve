@@ -17,10 +17,10 @@ dependencies = [
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
     "mcp[cli]>=1.13.1",
-    "llm-registry>=0.4.1",
+    "llm-registry>=0.4.2",
     "alembic-postgresql-enum>=1.8.0",
-    "pydantic-ai[logfire]>=1.0.1",
     "logfire[fastapi]>=4.4.0",
+    "pydantic-ai>=1.0.2",
 ]
 
 [dependency-groups]
