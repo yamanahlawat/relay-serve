@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/yamanahlawat/relay-serve/discussions
+    about: Ask questions and discuss with other community members
+  - name: 📖 Documentation
+    url: https://github.com/yamanahlawat/relay-serve#readme
+    about: Find information in our README and documentation
