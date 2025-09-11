@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: 💬 Discord Community
+    url: https://discord.gg/V5AHYx72Yv
+    about: Join our Discord server for real-time community support
   - name: 💬 Discussions
     url: https://github.com/yamanahlawat/relay-serve/discussions
     about: Ask questions and discuss with other community members
