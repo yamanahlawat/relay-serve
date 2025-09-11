@@ -58,6 +58,10 @@ Relay Serve is a **REST API server** that provides a consistent interface for ch
 | **Infrastructure** | Docker & Docker Compose      | Development environment    |
 | **Migrations**     | Alembic                      | Database schema management |
 
+## 🖥️ Frontend: Relay Connect
+
+**[Relay Connect](https://github.com/yamanahlawat/relay-connect)** is our companion Next.js frontend that provides a beautiful chat interface for Relay Serve. Check out the repository for setup instructions and screenshots.
+
 ## Quick Start
 
 ### Prerequisites
@@ -143,8 +147,8 @@ Add your API keys through the Relay API or directly in the database:
 
 ### Interactive Documentation
 
-- **Swagger UI**: http://localhost:8000/api/docs
-- **ReDoc**: http://localhost:8000/api/redoc
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## 🔧 Development
 
@@ -226,10 +230,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📖 [Documentation](https://github.com/yamanahlawat/relay-serve/wiki)
-- 💬 [Discussions](https://github.com/yamanahlawat/relay-serve/discussions)
-- 🐛 [Issues](https://github.com/yamanahlawat/relay-serve/issues)
-- 📧 [Email](mailto:yaman@outlook.com)
+- 💬 [Discord Community](https://discord.gg/V5AHYx72Yv)
+- 💬 [GitHub Discussions](https://github.com/yamanahlawat/relay-serve/discussions)
+- 🐛 [Issue Tracker](https://github.com/yamanahlawat/relay-serve/issues)
+- 📧 [Contact Maintainer](https://github.com/yamanahlawat)
 
 ---
 
