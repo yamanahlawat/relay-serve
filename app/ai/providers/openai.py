@@ -1,6 +1,6 @@
 """OpenAI provider builder."""
 
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from app.ai.providers.base import ProviderBuilder
@@ -11,7 +11,7 @@ from app.llms.models.provider import LLMProvider
 class OpenAIProviderBuilder(ProviderBuilder):
     """Builder for OpenAI and OpenAI-compatible providers."""
 
-    def build_model(self, provider: LLMProvider, model: LLMModel) -> OpenAIModel:
+    def build_model(self, provider: LLMProvider, model: LLMModel) -> OpenAIChatModel:
         """
         Build OpenAI model with custom provider configuration.
 
@@ -38,7 +38,7 @@ class OpenAIProviderBuilder(ProviderBuilder):
         # Create provider if we have custom configuration
         if provider_config:
             openai_provider = OpenAIProvider(**provider_config)
-            return OpenAIModel(model_name=model.name, provider=openai_provider)
+            return OpenAIChatModel(model_name=model.name, provider=openai_provider)
         else:
             # Use default provider with environment variables
-            return OpenAIModel(model_name=model.name)
+            return OpenAIChatModel(model_name=model.name)
