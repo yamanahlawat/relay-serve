@@ -1,6 +1,6 @@
 """Gemini provider builder."""
 
-from pydantic_ai.models.gemini import GeminiModel
+from pydantic_ai.models.google import GoogleModel
 
 from app.ai.providers.base import ProviderBuilder
 from app.llms.models.model import LLMModel
@@ -10,7 +10,7 @@ from app.llms.models.provider import LLMProvider
 class GeminiProviderBuilder(ProviderBuilder):
     """Builder for Google Gemini providers."""
 
-    def build_model(self, provider: LLMProvider, model: LLMModel) -> GeminiModel:
+    def build_model(self, provider: LLMProvider, model: LLMModel) -> GoogleModel:
         """
         Build Gemini model with custom provider configuration.
 
@@ -28,4 +28,4 @@ class GeminiProviderBuilder(ProviderBuilder):
         # For Gemini, we typically use the default provider
         # Custom configuration would need to be handled through environment variables
         # or custom client configuration
-        return GeminiModel(model_name=model.name)
+        return GoogleModel(model_name=model.name)
