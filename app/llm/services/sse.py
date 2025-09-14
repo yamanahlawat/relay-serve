@@ -75,12 +75,21 @@ class SSEConnectionManager:
 
             # Publish messages to the channel as they are generated
             async for chunk in generator:
-                if await self.redis.exists(cancel_key):  # Check for stop signal
+                # Use Redis pipeline to batch operations
+                pipe = self.redis.pipeline()
+                pipe.exists(cancel_key)  # Check for stop signal
+                pipe.exists(session_key)  # Check session exists
+                pipe.publish(pubsub_channel, chunk)  # Publish chunk
+
+                results = await pipe.execute()
+                cancel_exists, session_exists, _ = results
+
+                if cancel_exists:
                     logger.warning(f"Stream cancelled for session {session_id}")
                     break
-                if not await self.redis.exists(session_key):
+                if not session_exists:
                     break
-                await self.redis.publish(pubsub_channel, chunk)
+
                 # Format as proper SSE data
                 yield f"data: {chunk}\n\n"
 

@@ -1,9 +1,11 @@
+import asyncio
 import json
 import sys
 from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import UUID
 
+import aiofiles
 from llm_registry import CapabilityRegistry, ModelCapabilities
 from llm_registry.exceptions import ModelNotFoundError
 from loguru import logger
@@ -35,20 +37,20 @@ from pydantic_ai.messages import (
 from pydantic_ai.settings import ModelSettings
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.attachment.constants import AttachmentType
+from app.core.config import settings
+from app.core.database.session import AsyncSessionLocal
+from app.core.storage.utils import get_attachment_download_url
 from app.llm.providers.factory import ProviderFactory
 from app.llm.services.stream_block_factory import StreamBlockFactory
 from app.llm.services.tool_tracker import ToolCallTracker
-from app.attachment.constants import AttachmentType
+from app.mcp_server.lifecycle import mcp_lifecycle_manager
 from app.message.constants import MessageRole, MessageStatus
 from app.message.model import ChatMessage
 from app.message.schema import MessageCreate, MessageRead, MessageUpdate, MessageUsage
 from app.message.service import ChatMessageService
-from app.core.config import settings
-from app.core.database.session import AsyncSessionLocal
-from app.core.storage.utils import get_attachment_download_url
 from app.model.model import LLMModel
 from app.provider.model import LLMProvider
-from app.mcp_server.lifecycle import mcp_lifecycle_manager
 
 # Constants
 ONE_MILLION_TOKENS = 1_000_000
@@ -86,6 +88,40 @@ class ChatService:
             toolsets=toolsets,
         )
 
+    async def _process_single_attachment(
+        self, attachment, is_localhost: bool
+    ) -> BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl | None:
+        """
+        Process a single attachment to pydantic_ai compatible format.
+        """
+        if not attachment.storage_path:
+            return None
+
+        # Handle localhost case with binary content
+        if is_localhost:
+            file_path = Path(attachment.storage_path)
+            if file_path.exists():
+                async with aiofiles.open(file_path, "rb") as f:
+                    content = await f.read()
+                return BinaryContent(data=content, media_type=attachment.mime_type)
+            return None
+
+        # Handle remote URLs
+        attachment_url = get_attachment_download_url(storage_path=attachment.storage_path)
+        attachment_class = self._ATTACHMENT_TYPE_MAP.get(attachment.type)
+
+        if attachment_class:
+            # Use storage_path for VIDEO/AUDIO, attachment_url for IMAGE/DOCUMENT
+            url = (
+                attachment.storage_path
+                if attachment.type in (AttachmentType.VIDEO, AttachmentType.AUDIO)
+                else attachment_url
+            )
+            return attachment_class(url=url)
+        else:
+            logger.warning(f"Unsupported attachment: ID: {attachment.id}: Type: {attachment.type}")
+            return None
+
     async def _convert_attachments_to_pydantic(
         self, message: ChatMessage
     ) -> list[BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl] | None:
@@ -95,36 +131,21 @@ class ChatService:
         if not message.direct_attachments:
             return None
 
-        data = []
         is_localhost = "localhost" in str(settings.BASE_URL)
 
-        for attachment in message.direct_attachments:
-            if not attachment.storage_path:
+        attachment_tasks = [
+            self._process_single_attachment(attachment, is_localhost) for attachment in message.direct_attachments
+        ]
+
+        results = await asyncio.gather(*attachment_tasks, return_exceptions=True)
+
+        data = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Error processing attachment: {result}")
                 continue
-
-            # Handle localhost case with binary content
-            if is_localhost:
-                file_path = Path(attachment.storage_path)
-                if file_path.exists():
-                    with open(file_path, "rb") as f:
-                        content = f.read()
-                    data.append(BinaryContent(data=content, media_type=attachment.mime_type))
-                continue
-
-            # Handle remote URLs
-            attachment_url = get_attachment_download_url(storage_path=attachment.storage_path)
-            attachment_class = self._ATTACHMENT_TYPE_MAP.get(attachment.type)
-
-            if attachment_class:
-                # Use storage_path for VIDEO/AUDIO, attachment_url for IMAGE/DOCUMENT
-                url = (
-                    attachment.storage_path
-                    if attachment.type in (AttachmentType.VIDEO, AttachmentType.AUDIO)
-                    else attachment_url
-                )
-                data.append(attachment_class(url=url))
-            else:
-                logger.warning(f"Unsupported attachment type for message {message.id}: {attachment.type}")
+            if result is not None:
+                data.append(result)
 
         return data if data else None
 
@@ -257,23 +278,52 @@ class ChatService:
             return block.model_dump_json()
 
         try:
+            initial_block = StreamBlockFactory.create_thinking_block("Processing your request...")
+            yield collect_and_yield_block(initial_block)
+
+            asyncio.create_task(
+                self._update_message_status(
+                    session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
+                )
+            )
+
             async with AsyncSessionLocal() as db:
                 message_service = ChatMessageService(db=db)
-                # Get the current message
                 current_message = await message_service.get_message(session_id=session_id, message_id=message_id)
                 if not current_message or not current_message.content:
                     raise ValueError(f"Message {message_id} not found or has no content")
 
-            # Update message status to processing
-            await self._update_message_status(
-                session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
+            async def get_model_capability():
+                try:
+                    return self.model_registry.get_model(model_id=model.name)
+                except ModelNotFoundError:
+                    logger.warning(f"Model {model.name} not found in registry, using default settings")
+                    return None
+
+            toolsets_task = mcp_lifecycle_manager.get_running_servers()
+            message_history_task = self._prepare_message_history(session_id=session_id, current_message=current_message)
+            attachment_task = self._convert_attachments_to_pydantic(current_message)
+            model_capability_task = get_model_capability()
+
+            toolsets, message_history, attachment_messages, model_capability = await asyncio.gather(
+                toolsets_task, message_history_task, attachment_task, model_capability_task, return_exceptions=True
             )
 
-            # Get MCP servers directly from lifecycle manager
-            toolsets = await mcp_lifecycle_manager.get_running_servers()
+            if isinstance(toolsets, Exception):
+                logger.warning(f"Error getting MCP servers: {toolsets}")
+                toolsets = []
+            if isinstance(message_history, Exception):
+                logger.warning(f"Error retrieving message history: {message_history}")
+                message_history = []
+            if isinstance(attachment_messages, Exception):
+                logger.warning(f"Error processing attachments: {attachment_messages}")
+                attachment_messages = None
+            if isinstance(model_capability, Exception):
+                logger.warning(f"Error getting model capability: {model_capability}")
+                model_capability = None
+
             logger.debug(f"Retrieved {len(toolsets)} running MCP servers for agent")
 
-            # Create agent
             agent = await self._create_agent(
                 provider=provider,
                 model=model,
@@ -281,19 +331,6 @@ class ChatService:
                 toolsets=toolsets,
             )
 
-            # Prepare message history and model settings
-            message_history = await self._prepare_message_history(
-                session_id=session_id, current_message=current_message
-            )
-
-            # Get Model Capability from registry
-            try:
-                model_capability = self.model_registry.get_model(model_id=model.name)
-            except ModelNotFoundError:
-                logger.warning(f"Model {model.name} not found in registry, using default settings")
-                model_capability = None
-
-            # Prepare model settings
             model_settings = self._prepare_model_settings(
                 model=model,
                 temperature=temperature,
@@ -301,9 +338,6 @@ class ChatService:
                 top_p=top_p,
                 model_capability=model_capability,
             )
-
-            # Prepare user prompt with attachments
-            attachment_messages = await self._convert_attachments_to_pydantic(current_message)
             if attachment_messages:
                 user_prompt = [current_message.content, *attachment_messages]
             else:

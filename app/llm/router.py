@@ -6,10 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import StreamingResponse
 
+from app.api.schemas.error import ErrorResponseModel
 from app.llm.dependencies.chat import get_chat_service
 from app.llm.schemas.chat import CompletionParams
 from app.llm.services import ChatService, SSEConnectionManager, get_sse_manager
-from app.api.schemas.error import ErrorResponseModel
 from app.session.dependencies import get_chat_session_service
 from app.session.service import ChatSessionService
 
