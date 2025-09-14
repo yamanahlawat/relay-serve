@@ -4,11 +4,11 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.ai.services.sse import get_sse_manager
+from app.llm.services.sse import get_sse_manager
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logfire import configure_logfire
-from app.model_context_protocol.services.lifecycle import mcp_lifecycle_manager
+from app.mcp_server.lifecycle import mcp_lifecycle_manager
 
 
 @asynccontextmanager

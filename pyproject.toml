@@ -19,8 +19,8 @@ dependencies = [
     "mcp[cli]>=1.14.0",
     "llm-registry>=0.4.2",
     "alembic-postgresql-enum>=1.8.0",
-    "logfire[fastapi]>=4.6.0",
-    "pydantic-ai>=1.0.5",
+    "logfire[fastapi]>=4.7.0",
+    "pydantic-ai>=1.0.6",
 ]
 
 [dependency-groups]
@@ -30,3 +30,8 @@ dev = [
     "ruff>=0.13.0",
     "tomli-w>=1.2.0",
 ]
+
+[tool.codespell]
+skip = ".git*,*.svg,*.lock,*.css,*.yaml"
+check-hidden = true
+ignore-words-list = ['selectin']

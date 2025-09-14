@@ -1,18 +1,18 @@
 from fastapi import APIRouter
 
-from app.ai.router import router as ai_router
-from app.chat.router.attachment import router as attachment_router
-from app.chat.router.message import router as message_router
-from app.chat.router.session import router as session_router
-from app.llms.router.model import router as model_router
-from app.llms.router.provider import router as provider_router
-from app.model_context_protocol.router import router as mcp_router
+from app.llm.router import router as llm_router
+from app.attachment.router import router as attachment_router
+from app.mcp_server.router import router as mcp_router
+from app.message.router import router as message_router
+from app.model.router import router as model_router
+from app.provider.router import router as provider_router
+from app.session.router import router as session_router
 
 api_router = APIRouter(prefix="/v1")
 
 
 # Include all routers
-api_router.include_router(router=ai_router)
+api_router.include_router(router=llm_router)
 # Chat Routers
 api_router.include_router(router=session_router)
 api_router.include_router(router=message_router)
