@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import BackgroundTasks
 from loguru import logger
-from redis.asyncio import Redis
+from redis.asyncio import Redis, ConnectionPool
 
 from app.core.config import settings
 
@@ -20,15 +20,18 @@ class SSEConnectionManager:
     @classmethod
     async def create(cls) -> "SSEConnectionManager":
         """
-        Factory method to create connection manager with Redis.
+        Factory method to create connection manager with Redis connection pool.
         """
-        redis = Redis.from_url(
+        pool = ConnectionPool.from_url(
             url=str(settings.REDIS.DSN),
             encoding="utf-8",
             decode_responses=True,
             socket_keepalive=True,
             health_check_interval=30,
+            max_connections=20,
+            retry_on_timeout=True,
         )
+        redis = Redis(connection_pool=pool)
         return cls(redis=redis)
 
     async def connect(self, session_id: UUID) -> None:

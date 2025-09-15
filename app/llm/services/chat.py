@@ -161,6 +161,10 @@ class ChatService:
                     exclude_message_id=current_message.id if current_message else None,
                 )
 
+                # Reverse to get chronological order (oldest first) for LLM context
+                if recent_messages:
+                    recent_messages = list(reversed(recent_messages))
+
                 # Convert database messages to ModelMessage objects
                 message_history = []
                 for msg in recent_messages or []:
