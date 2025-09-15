@@ -24,3 +24,7 @@ class StorageProvider(BaseEnum):
 
     LOCAL = "local"
     S3 = "s3"
+
+
+# Performance constants
+MAX_CONTEXT_MESSAGES = 50  # Maximum number of messages to include in chat context

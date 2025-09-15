@@ -30,7 +30,7 @@ class ChatSessionService:
         return await crud_session.filter(db=self.db, filters=filters, offset=offset, limit=limit)
 
     async def get_session(self, session_id: UUID) -> ChatSession:
-        session = await crud_session.get(self.db, id=session_id)
+        session = await crud_session.get_with_relations(self.db, id=session_id)
         if not session:
             raise SessionNotFoundException(session_id=session_id)
         return session

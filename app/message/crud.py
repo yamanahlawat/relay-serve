@@ -5,6 +5,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.constants import MAX_CONTEXT_MESSAGES
 from app.core.database.crud import CRUDBase
 from app.message.constants import MessageRole, MessageStatus
 from app.message.model import ChatMessage, MessageAttachment
@@ -127,7 +128,8 @@ class CRUDMessage(CRUDBase[ChatMessage, MessageCreate, MessageUpdate]):
             select(self.model)
             .options(selectinload(self.model.attachments))
             .where(*conditions)
-            .order_by(self.model.created_at.asc())
+            .order_by(self.model.created_at.desc())  # Get most recent first
+            .limit(MAX_CONTEXT_MESSAGES)  # Limit to prevent memory issues
         )
 
         result = await db.execute(query)

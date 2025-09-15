@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     # Uncomment the following line to run the relay in development mode
-    entrypoint: ["tail", "-f", "/dev/null"]
+    # entrypoint: ["tail", "-f", "/dev/null"]
     volumes:
       - ./:/src
       - uploads:/uploads

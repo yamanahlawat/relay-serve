@@ -25,26 +25,36 @@ Relay Serve is a **REST API server** that provides a consistent interface for ch
 
 - OpenAI, Anthropic, Google Gemini, Groq, Mistral, Cohere, AWS Bedrock
 - Single API endpoint works with any configured provider
+- Provider factory pattern with Pydantic AI integration
 - Easy to add new providers
 
-**Chat Session Management**
+**Session & Message Management**
 
-- Persistent conversation storage
-- Message history and context
-- File attachment support (images)
-- Token usage and cost tracking
+- Persistent conversation storage with PostgreSQL
+- Message history and context preservation
+- File attachment support with image processing
+- Structured session lifecycle management
+
+**Model Context Protocol (MCP) Integration**
+
+- Full MCP server support for tool integration
+- Server lifecycle management and validation
+- External tool and context integration
 
 **Real-time Communication**
 
-- Server-Sent Events for streaming responses
-- Async request handling
+- Server-Sent Events (SSE) for streaming responses
+- Async request handling with FastAPI
+- Tool tracking and execution monitoring
 
-**Developer Tools**
+**Developer Experience**
 
 - Complete REST API with automatic documentation
 - Database migrations with Alembic
 - Type-safe Python code with Pydantic
+- Modern dependency management with UV
 - Docker development environment
+- Application monitoring with Logfire
 
 ## 🛠️ Tech Stack
 
@@ -52,11 +62,14 @@ Relay Serve is a **REST API server** that provides a consistent interface for ch
 | ------------------ | ---------------------------- | -------------------------- |
 | **Backend**        | FastAPI (Python 3.13+)       | Async REST API server      |
 | **Database**       | PostgreSQL                   | Primary data storage       |
-| **Cache**          | Dragonfly (Redis-compatible) | Session management         |
+| **Cache**          | Dragonfly (Redis-compatible) | Session and data caching   |
 | **ORM**            | SQLAlchemy 2.0               | Database operations        |
-| **AI Framework**   | Pydantic AI                  | LLM provider abstraction   |
+| **AI Framework**   | Pydantic AI 1.0+             | LLM provider abstraction   |
 | **Infrastructure** | Docker & Docker Compose      | Development environment    |
 | **Migrations**     | Alembic                      | Database schema management |
+| **Package Manager**| UV                           | Fast Python dependency management |
+| **MCP**            | Model Context Protocol       | Tool and context integration |
+| **Monitoring**     | Logfire                      | Application observability  |
 
 ## 🖥️ Frontend: Relay Connect
 
@@ -168,18 +181,23 @@ pre-commit run --all-files
 
 ```
 app/
-├── ai/              # LLM providers and chat logic
-│   ├── providers/   # Provider implementations
-│   ├── services/    # Chat and streaming services
-│   └── schemas/     # AI-related data models
-├── chat/            # Chat sessions and messages
-│   ├── models/      # Database models
-│   ├── router/      # API endpoints
-│   └── services/    # Business logic
-├── llms/            # LLM management
-├── core/            # Configuration and utilities
-├── database/        # Database setup and utilities
-└── files/           # File storage and processing
+├── llm/             # LLM providers and chat services
+│   ├── providers/   # Provider implementations (OpenAI, Anthropic, etc.)
+│   ├── services/    # Chat, SSE streaming, and tool tracking
+│   ├── schemas/     # LLM-related data models
+│   └── dependencies/ # LLM dependency injection
+├── session/         # Chat session management
+├── message/         # Message handling and storage
+├── attachment/      # File attachment processing
+├── mcp_server/      # Model Context Protocol server
+├── model/           # AI model definitions and management
+├── provider/        # Provider configuration and management
+├── core/            # Core infrastructure
+│   ├── database/    # Database setup and CRUD operations
+│   ├── storage/     # File storage interfaces
+│   ├── image/       # Image processing utilities
+│   └── config.py    # Application configuration
+└── api/             # API versioning and schemas
 ```
 
 ## 🚀 Deployment
