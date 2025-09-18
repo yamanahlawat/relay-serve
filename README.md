@@ -80,28 +80,43 @@ Relay Serve is a **REST API server** that provides a consistent interface for ch
 ### Prerequisites
 
 - Docker and Docker Compose
-- Python 3.13+ (for local development)
 - Git
 
-### Docker Setup (Recommended)
+### 🚀 Full Stack Setup (Frontend + Backend)
 
-1. **Clone and configure**
+**Option 1: Interactive Setup (Recommended)**
+```bash
+git clone https://github.com/yamanahlawat/relay-serve.git
+cd relay-serve
+./scripts/setup-full-stack.sh
+```
+
+**Option 2: Manual Setup**
+```bash
+git clone https://github.com/yamanahlawat/relay-serve.git
+cd relay-serve
+cp .env.template .env
+# Add your LLM provider API keys to .env
+docker-compose -f docker-compose.full-stack.yml up
+```
+
+**🎉 That's it!** Visit:
+- **Chat Interface**: http://localhost:3000
+- **API Documentation**: http://localhost:8000/docs
+
+### 🔧 Backend Only Setup
+
+For API development or integration testing:
 
 ```bash
 git clone https://github.com/yamanahlawat/relay-serve.git
 cd relay-serve
 cp .env.template .env
-# Edit .env with your configuration
-```
-
-2. **Start everything**
-
-```bash
+# Add your configuration
 docker-compose up -d
 ```
 
-3. **Access the API**
-
+**Access:**
 - API Documentation: http://localhost:8000/docs
 - Interactive API: http://localhost:8000/redoc
 
