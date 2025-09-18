@@ -39,6 +39,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.attachment.constants import AttachmentType
 from app.core.config import settings
+from app.core.constants import StorageProvider
 from app.core.database.session import AsyncSessionLocal
 from app.core.storage.utils import get_attachment_download_url
 from app.llm.providers.factory import ProviderFactory
@@ -89,7 +90,7 @@ class ChatService:
         )
 
     async def _process_single_attachment(
-        self, attachment, is_localhost: bool
+        self, attachment
     ) -> BinaryContent | ImageUrl | VideoUrl | AudioUrl | DocumentUrl | None:
         """
         Process a single attachment to pydantic_ai compatible format.
@@ -98,7 +99,7 @@ class ChatService:
             return None
 
         # Handle localhost case with binary content
-        if is_localhost:
+        if settings.STORAGE_PROVIDER == StorageProvider.LOCAL:
             file_path = Path(attachment.storage_path)
             if file_path.exists():
                 async with aiofiles.open(file_path, "rb") as f:
@@ -131,11 +132,7 @@ class ChatService:
         if not message.direct_attachments:
             return None
 
-        is_localhost = "localhost" in str(settings.BASE_URL)
-
-        attachment_tasks = [
-            self._process_single_attachment(attachment, is_localhost) for attachment in message.direct_attachments
-        ]
+        attachment_tasks = [self._process_single_attachment(attachment) for attachment in message.direct_attachments]
 
         results = await asyncio.gather(*attachment_tasks, return_exceptions=True)
 

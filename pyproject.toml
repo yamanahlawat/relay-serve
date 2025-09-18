@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.16.5",
     "asyncpg>=0.30.0",
-    "fastapi[standard]>=0.116.1",
+    "fastapi[standard]>=0.116.2",
     "pydantic-settings>=2.10.1",
     "sqlalchemy>=2.0.43",
     "greenlet>=3.2.4",
@@ -16,11 +16,11 @@ dependencies = [
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.20",
     "pillow>=11.3.0",
-    "mcp[cli]>=1.14.0",
+    "mcp[cli]>=1.14.1",
     "llm-registry>=0.4.2",
     "alembic-postgresql-enum>=1.8.0",
     "logfire[fastapi]>=4.7.0",
-    "pydantic-ai>=1.0.6",
+    "pydantic-ai>=1.0.8",
 ]
 
 [dependency-groups]
@@ -34,4 +34,6 @@ dev = [
 [tool.codespell]
 skip = ".git*,*.svg,*.lock,*.css,*.yaml"
 check-hidden = true
-ignore-words-list = ['selectin']
+ignore-words-list = [
+    "selectin",
+]
