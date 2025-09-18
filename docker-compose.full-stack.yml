@@ -1,0 +1,90 @@
+services:
+  # Relay Backend
+  relay-serve:
+    build:
+      context: .
+      dockerfile: docker/dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./:/src
+      - uploads:/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - ${RELAY_PORT:-8000}:8000
+    networks:
+      - relay_network
+    depends_on:
+      relay_db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+
+  # Relay Frontend (Next.js)
+  relay-connect:
+    image: ghcr.io/yamanahlawat/relay-connect:latest
+    ports:
+      - ${FRONTEND_PORT:-3000}:3000
+    environment:
+      - NEXT_PUBLIC_RELAY_SERVE_HOST=http://relay-serve:${RELAY_PORT:-8000}
+    networks:
+      - relay_network
+    depends_on:
+      - relay-serve
+
+  # Relay PostgreSQL
+  relay_db:
+    image: postgres:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${DATABASE__USER:-relay_user}
+      POSTGRES_PASSWORD: ${DATABASE__PASSWORD:-relay_super_secret_password}
+      POSTGRES_DB: ${DATABASE__DB:-relay_db}
+    ports:
+      - ${DATABASE__PORT:-5420}:5432
+    volumes:
+      - relay_db:/var/lib/postgresql/data
+    networks:
+      - relay_network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "${DATABASE__USER:-relay_user}",
+          "-d",
+          "${DATABASE__DB:-relay_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Dragonfly cache
+  cache:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
+    restart: always
+    ulimits:
+      memlock: -1
+    ports:
+      - ${CACHE_PORT:-6379}:6379
+    volumes:
+      - cache_data:/data
+    networks:
+      - relay_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  relay_db:
+  cache_data:
+  uploads:
+
+networks:
+  relay_network:
+    driver: bridge

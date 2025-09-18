@@ -27,4 +27,4 @@ class StorageProvider(BaseEnum):
 
 
 # Performance constants
-MAX_CONTEXT_MESSAGES = 50  # Maximum number of messages to include in chat context
+MAX_CONTEXT_MESSAGES = 20  # Maximum number of messages to include in chat context
