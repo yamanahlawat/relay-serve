@@ -1,4 +1,3 @@
-# app/storages/local.py
 from pathlib import Path
 from typing import AsyncGenerator
 from uuid import uuid4
