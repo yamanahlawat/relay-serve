@@ -20,7 +20,8 @@ dependencies = [
     "llm-registry>=0.4.4",
     "alembic-postgresql-enum>=1.8.0",
     "logfire[fastapi]>=4.11.0",
-    "pydantic-ai>=1.0.14",
+    "pydantic-ai>=1.0.15",
+    "pgvector>=0.4.1",
 ]
 
 [dependency-groups]

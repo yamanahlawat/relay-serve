@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, remote
 
 from app.core.database.base_class import TimeStampedBase
+from app.memory.constants import MemoryTier
 from app.message.constants import MessageRole, MessageStatus
 
 from app.attachment.model import Attachment
@@ -53,6 +54,12 @@ class ChatMessage(TimeStampedBase):
 
     # Additional data (e.g., function calls, citations)
     extra_data: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # Memory metadata
+    importance_score: Mapped[float] = mapped_column(default=0.0, server_default="0.0", index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memory_tier: Mapped[MemoryTier | None] = mapped_column(String(20), nullable=True)
+    extracted_facts: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     # Relationships
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
