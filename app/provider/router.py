@@ -1,16 +1,16 @@
 """Provider API router."""
 
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.schemas.error import ErrorResponseModel
-from app.provider.dependencies import get_provider_service
+from app.provider.dependencies import LLMProviderServiceDep
 from app.provider.exceptions import DuplicateProviderException, ProviderNotFoundException
 from app.provider.model import LLMProvider
 from app.provider.schema import ProviderCreate, ProviderRead, ProviderUpdate
-from app.provider.service import LLMProviderService
 
 router = APIRouter(prefix="/providers", tags=["Providers"])
 
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/providers", tags=["Providers"])
 )
 async def create_provider(
     provider_in: ProviderCreate,
-    service: LLMProviderService = Depends(get_provider_service),
+    service: LLMProviderServiceDep,
 ) -> LLMProvider:
     """
     ## Create a New LLM Provider
@@ -68,11 +68,11 @@ async def create_provider(
     },
 )
 async def list_providers(
-    service: LLMProviderService = Depends(get_provider_service),
+    service: LLMProviderServiceDep,
     is_active: bool | None = None,
     provider_name: str | None = None,
-    offset: int = 0,
-    limit: int = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> Sequence[LLMProvider]:
     """
     ## List All LLM Providers
@@ -115,7 +115,7 @@ async def list_providers(
 )
 async def get_provider(
     provider_id: UUID,
-    service: LLMProviderService = Depends(get_provider_service),
+    service: LLMProviderServiceDep,
 ) -> LLMProvider:
     """
     ## Get a Specific LLM Provider
@@ -157,7 +157,7 @@ async def get_provider(
 async def update_provider(
     provider_in: ProviderUpdate,
     provider_id: UUID,
-    service: LLMProviderService = Depends(get_provider_service),
+    service: LLMProviderServiceDep,
 ) -> LLMProvider | None:
     """
     ## Update a Specific LLM Provider
@@ -209,7 +209,7 @@ async def update_provider(
 )
 async def delete_provider(
     provider_id: UUID,
-    service: LLMProviderService = Depends(get_provider_service),
+    service: LLMProviderServiceDep,
 ) -> None:
     """
     ## Delete a Specific LLM Provider

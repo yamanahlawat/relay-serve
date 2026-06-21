@@ -5,29 +5,29 @@ description = "Simple yet effective open source LLM Studio."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "alembic>=1.16.5",
-    "asyncpg>=0.30.0",
-    "fastapi[standard]>=0.118.0",
-    "pydantic-settings>=2.11.0",
-    "sqlalchemy>=2.0.43",
-    "greenlet>=3.2.4",
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "fastapi[standard]>=0.138.0",
+    "pydantic-settings>=2.14.2",
+    "sqlalchemy>=2.0.51",
+    "greenlet>=3.5.2",
     "loguru>=0.7.3",
-    "redis[hiredis]>=6.4.0",
-    "aiofiles>=24.1.0",
-    "python-multipart>=0.0.20",
-    "pillow>=11.3.0",
-    "mcp[cli]>=1.16.0",
-    "llm-registry>=0.4.4",
-    "alembic-postgresql-enum>=1.8.0",
-    "logfire[fastapi]>=4.11.0",
-    "pydantic-ai>=1.0.14",
+    "redis[hiredis]>=8.0.0",
+    "aiofiles>=25.1.0",
+    "python-multipart>=0.0.32",
+    "pillow>=12.2.0",
+    "mcp[cli]>=1.28.0",
+    "llm-registry>=0.6.3",
+    "alembic-postgresql-enum>=1.10.0",
+    "pydantic-ai>=1.107.0",
+    "logfire[asyncpg,fastapi,redis,sqlalchemy]>=4.37.0",
 ]
 
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",
-    "pre-commit>=4.3.0",
-    "ruff>=0.13.3",
+    "pre-commit>=4.6.0",
+    "ruff>=0.15.18",
     "tomli-w>=1.2.0",
 ]
 

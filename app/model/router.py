@@ -1,15 +1,15 @@
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.schemas.error import ErrorResponseModel
-from app.model.dependencies import get_model_service
+from app.model.dependencies import LLMModelServiceDep
 from app.model.exceptions import DuplicateModelException, ModelNotFoundException
 from app.provider.exceptions import ProviderNotFoundException
 from app.model.model import LLMModel
 from app.model.schema import ModelCreate, ModelRead, ModelsByProvider, ModelUpdate
-from app.model.service import LLMModelService
 
 router = APIRouter(prefix="/models", tags=["Models"])
 
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/models", tags=["Models"])
 )
 async def create_model(
     model_in: ModelCreate,
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
 ) -> LLMModel:
     """
     ## Create a New LLM Model Configuration
@@ -75,7 +75,7 @@ async def create_model(
 
 @router.get("/all/", response_model=ModelsByProvider)
 async def list_models_by_provider(
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
 ) -> dict[str, list[LLMModel]]:
     """
     ## List All Models Grouped by Provider
@@ -94,12 +94,12 @@ async def list_models_by_provider(
     responses={status.HTTP_200_OK: {"description": "Successfully retrieved list of models", "model": list[ModelRead]}},
 )
 async def list_models(
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
     provider_id: UUID | None = None,
     is_active: bool | None = None,
     model_name: str | None = None,
-    offset: int = 0,
-    limit: int = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> Sequence[LLMModel]:
     """
     ## List All LLM Models
@@ -142,7 +142,7 @@ async def list_models(
 )
 async def get_model(
     llm_model_id: UUID,
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
 ) -> LLMModel:
     """
     ## Get a Specific LLM Model
@@ -182,7 +182,7 @@ async def get_model(
 async def update_model(
     model_in: ModelUpdate,
     llm_model_id: UUID,
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
 ) -> LLMModel | None:
     """
     ## Update a Specific LLM Model Configuration
@@ -232,7 +232,7 @@ async def update_model(
 )
 async def delete_model(
     llm_model_id: UUID,
-    service: LLMModelService = Depends(get_model_service),
+    service: LLMModelServiceDep,
 ) -> None:
     """
     ## Delete a Specific LLM Model Configuration

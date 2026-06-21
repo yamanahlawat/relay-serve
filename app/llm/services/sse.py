@@ -1,8 +1,9 @@
 import json
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Depends
 from loguru import logger
 from redis.asyncio import Redis, ConnectionPool
 
@@ -126,3 +127,6 @@ async def get_sse_manager() -> SSEConnectionManager:
     if manager is None:
         manager = await SSEConnectionManager.create()
     return manager
+
+
+SSEManagerDep = Annotated[SSEConnectionManager, Depends(get_sse_manager)]

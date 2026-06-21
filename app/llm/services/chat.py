@@ -2,7 +2,8 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
 
 import aiofiles
@@ -73,6 +74,9 @@ class ChatService:
     def __init__(self) -> None:
         """Initialize the chat service with database session."""
         self.model_registry = CapabilityRegistry()
+        # Hold strong references to fire-and-forget background tasks so they are
+        # not garbage-collected mid-flight (see asyncio.create_task docs).
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def _create_agent(
         self,
@@ -282,11 +286,13 @@ class ChatService:
             initial_block = StreamBlockFactory.create_thinking_block("Processing your request...")
             yield collect_and_yield_block(initial_block)
 
-            asyncio.create_task(
+            status_task = asyncio.create_task(
                 self._update_message_status(
                     session_id=session_id, message_id=message_id, status=MessageStatus.PROCESSING
                 )
             )
+            self._background_tasks.add(status_task)
+            status_task.add_done_callback(self._background_tasks.discard)
 
             async with AsyncSessionLocal() as db:
                 message_service = ChatMessageService(db=db)
@@ -535,13 +541,13 @@ class ChatService:
                 if usage_data:
                     costs = self._calculate_cost(
                         model=model,
-                        input_tokens=getattr(usage_data, "request_tokens", 0),
-                        output_tokens=getattr(usage_data, "response_tokens", 0),
+                        input_tokens=getattr(usage_data, "input_tokens", 0),
+                        output_tokens=getattr(usage_data, "output_tokens", 0),
                         model_capability=model_capability,
                     )
                     assistant_message.usage = MessageUsage(
-                        input_tokens=getattr(usage_data, "request_tokens", 0),
-                        output_tokens=getattr(usage_data, "response_tokens", 0),
+                        input_tokens=getattr(usage_data, "input_tokens", 0),
+                        output_tokens=getattr(usage_data, "output_tokens", 0),
                         input_cost=costs["input_cost"],
                         output_cost=costs["output_cost"],
                     )

@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.attachment.dependencies import get_attachment_service
+from app.attachment.dependencies import AttachmentServiceDep
 from app.attachment.model import Attachment
 from app.attachment.schema import AttachmentRead
-from app.attachment.service import AttachmentService
 from app.core.storage.utils import get_storage, normalize_filename, sanitize_filename
 
 router = APIRouter(prefix="/attachments", tags=["Attachments"])
@@ -14,7 +13,7 @@ router = APIRouter(prefix="/attachments", tags=["Attachments"])
 async def upload_attachment(
     folder: str,
     file: UploadFile,
-    service: AttachmentService = Depends(get_attachment_service),
+    service: AttachmentServiceDep,
 ) -> Attachment:
     """
     Upload a single file attachment.

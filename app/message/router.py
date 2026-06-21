@@ -1,9 +1,10 @@
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from app.message.dependencies import get_chat_message_service
+from app.message.dependencies import ChatMessageServiceDep
 from app.message.exceptions import (
     InvalidMessageSessionException,
     InvalidParentMessageSessionException,
@@ -12,7 +13,6 @@ from app.message.exceptions import (
 )
 from app.message.model import ChatMessage
 from app.message.schema import MessageCreate, MessageRead, MessageUpdate
-from app.message.service import ChatMessageService
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/messages", tags=["Messages"])
 async def create_message(
     session_id: UUID,
     message_in: MessageCreate,
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
 ) -> ChatMessage:
     """
     Create a new message in the specified chat session with support for file attachments.
@@ -67,9 +67,9 @@ async def create_message(
 @router.get("/{session_id}/", response_model=list[MessageRead])
 async def list_session_messages(
     session_id: UUID,
-    offset: int = 0,
-    limit: int = 10,
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> Sequence[ChatMessage]:
     """
     ## List Session Messages
@@ -93,7 +93,7 @@ async def list_session_messages(
 async def get_message(
     session_id: UUID,
     message_id: UUID,
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
 ) -> ChatMessage:
     """
     ## Get Message Details
@@ -129,7 +129,7 @@ async def update_message(
     message_in: MessageUpdate,
     message_id: UUID,
     session_id: UUID,
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
 ) -> ChatMessage | None:
     """
     ## Update Message
@@ -167,7 +167,7 @@ async def update_message(
 async def delete_message(
     message_id: UUID,
     session_id: UUID,
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
 ) -> None:
     """
     ## Delete Message
@@ -198,7 +198,7 @@ async def delete_message(
 @router.delete("/bulk/", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_delete_messages(
     message_ids: list[UUID],
-    service: ChatMessageService = Depends(get_chat_message_service),
+    service: ChatMessageServiceDep,
 ) -> None:
     """
     ## Bulk Delete Messages

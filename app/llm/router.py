@@ -1,17 +1,17 @@
 """Chat router using pydantic_ai with message-based streaming."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas.error import ErrorResponseModel
-from app.llm.dependencies.chat import get_chat_service
+from app.llm.dependencies.chat import ChatServiceDep
 from app.llm.schemas.chat import CompletionParams
-from app.llm.services import ChatService, SSEConnectionManager, get_sse_manager
-from app.session.dependencies import get_chat_session_service
-from app.session.service import ChatSessionService
+from app.llm.services import SSEManagerDep
+from app.session.dependencies import ChatSessionServiceDep
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -38,10 +38,10 @@ async def stream_completion(
     session_id: UUID,
     message_id: UUID,
     background_tasks: BackgroundTasks,
-    params: CompletionParams = Depends(),
-    session_service: ChatSessionService = Depends(get_chat_session_service),
-    chat_service: ChatService = Depends(get_chat_service),
-    sse_manager: SSEConnectionManager = Depends(get_sse_manager),
+    session_service: ChatSessionServiceDep,
+    chat_service: ChatServiceDep,
+    sse_manager: SSEManagerDep,
+    params: Annotated[CompletionParams, Depends()],
 ) -> StreamingResponse:
     """
     ## Stream Chat Completion
@@ -107,7 +107,7 @@ async def stream_completion(
 )
 async def stop_completion(
     session_id: UUID,
-    sse_manager: SSEConnectionManager = Depends(get_sse_manager),
+    sse_manager: SSEManagerDep,
 ) -> None:
     """
     ## Stop Chat Completion Stream
