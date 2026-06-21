@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
-from pydantic import HttpUrl, PostgresDsn, RedisDsn, SecretStr, ValidationInfo, field_validator
+from pydantic import HttpUrl, PostgresDsn, RedisDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.constants import Environment, StorageProvider
@@ -15,22 +16,22 @@ class DatabaseSettings(BaseSettings):
     PORT: int = 5432
     DSN: PostgresDsn | None = None
 
-    @field_validator("DSN", mode="after")
-    def assemble_db_connection(cls, value: PostgresDsn | None, info: ValidationInfo) -> PostgresDsn:
+    @model_validator(mode="after")
+    def assemble_db_connection(self) -> Self:
         """
-        Assembles the database connection URL from the individual components.
+        Assemble the database connection URL from the individual components
+        when an explicit DSN is not provided.
         """
-        if isinstance(value, str):
-            return value
-        values = info.data
-        return PostgresDsn.build(
-            scheme="postgresql+asyncpg",
-            username=values.get("USER"),
-            password=values.get("PASSWORD").get_secret_value(),
-            host=values.get("HOST"),
-            port=values.get("PORT"),
-            path=values.get("DB"),
-        )
+        if self.DSN is None:
+            self.DSN = PostgresDsn.build(
+                scheme="postgresql+asyncpg",
+                username=self.USER,
+                password=self.PASSWORD.get_secret_value(),
+                host=self.HOST,
+                port=self.PORT,
+                path=self.DB,
+            )
+        return self
 
 
 class RedisSettings(BaseSettings):
@@ -39,20 +40,20 @@ class RedisSettings(BaseSettings):
     DB: int
     DSN: RedisDsn | None = None
 
-    @field_validator("DSN", mode="after")
-    def assemble_redis_connection(cls, value: RedisDsn | None, info: ValidationInfo) -> RedisDsn:
+    @model_validator(mode="after")
+    def assemble_redis_connection(self) -> Self:
         """
-        Assembles the Redis connection URL from the individual components.
+        Assemble the Redis connection URL from the individual components
+        when an explicit DSN is not provided.
         """
-        if isinstance(value, str):
-            return value
-        values = info.data
-        return RedisDsn.build(
-            scheme="redis",
-            host=values.get("HOST", ""),
-            port=values.get("PORT"),
-            path=str(values.get("DB")),
-        )
+        if self.DSN is None:
+            self.DSN = RedisDsn.build(
+                scheme="redis",
+                host=self.HOST,
+                port=self.PORT,
+                path=str(self.DB),
+            )
+        return self
 
 
 class Settings(BaseSettings):

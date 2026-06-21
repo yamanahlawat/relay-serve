@@ -19,12 +19,16 @@ Notes:
     - Removes duplicate version constraints
 """
 
+import re
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 import tomli_w
+
+# Regex to split on any PEP 440 version specifier operator
+_VERSION_SPEC_RE = re.compile(r"(~=|==|!=|<=|>=|<|>)")
 
 
 def run_uv_lock_update() -> bool:
@@ -33,10 +37,8 @@ def run_uv_lock_update() -> bool:
     print("-" * 50)
 
     try:
-        # Run uv lock -U
         result = subprocess.run(["uv", "lock", "-U"], capture_output=True, text=True, check=True)
 
-        # Print output
         if result.stdout:
             print(result.stdout)
 
@@ -54,70 +56,116 @@ def run_uv_lock_update() -> bool:
         return False
 
 
-def clean_dependency(dep: str) -> tuple[str, str]:
-    """Clean dependency string and return package name and extras."""
-    base = dep.split(">=")[0].strip()
+def _normalize_name(name: str) -> str:
+    """Normalize a package name per PEP 503 (lowercase, [-_.] -> hyphens)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
-    # Extract extras if present
-    if "[" in base:
-        pkg_name = base.split("[")[0].strip()
-        extras = "[" + base.split("[")[1]
-        return pkg_name.lower(), extras
-    return base.lower(), ""
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Convert a version string like '1.2.3' into a tuple of ints for comparison."""
+    parts: list[int] = []
+    for part in version.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            break
+    return tuple(parts)
+
+
+def _parse_dependency(dep: str) -> tuple[str, str]:
+    """Parse a dependency string into (package name with extras, raw name for lookup).
+
+    Returns:
+        A tuple of (base string before version specifier, normalized package name).
+        The base string preserves the original casing and extras for display.
+
+    Examples:
+        "rich>=14.0"        -> ("rich", "rich")
+        "fastapi[standard]>=0.100" -> ("fastapi[standard]", "fastapi")
+        "Ruff==0.5.0"       -> ("Ruff", "ruff")
+        "httpx"             -> ("httpx", "httpx")
+    """
+    # Split on the first version specifier operator
+    parts = _VERSION_SPEC_RE.split(dep, maxsplit=1)
+    base = parts[0].strip()
+
+    # Extract the bare package name (without extras) for version lookup
+    pkg_name = base.split("[")[0].strip() if "[" in base else base
+    return base, _normalize_name(pkg_name)
+
+
+def _parse_lock_versions(lock_path: Path) -> dict[str, str]:
+    """Parse uv.lock (TOML) and return a dict of normalized package name -> version.
+
+    When a package appears multiple times (e.g. different versions per Python
+    resolution marker), keeps the lowest version so that the '>=' constraint
+    is satisfiable across all supported Python versions.
+    """
+    lock_data = tomllib.loads(lock_path.read_text())
+    versions: dict[str, str] = {}
+
+    for package in lock_data.get("package", []):
+        name = _normalize_name(package["name"])
+        version = package.get("version", "")
+        if not version:
+            continue
+
+        if name not in versions or _version_tuple(version) < _version_tuple(versions[name]):
+            versions[name] = version
+
+    return versions
+
+
+def _update_dep_list(deps: list[str], versions: dict[str, str]) -> list[tuple[str, str]]:
+    """Update a list of dependency strings in place. Returns list of (old, new) changes."""
+    changes: list[tuple[str, str]] = []
+    for i, dep in enumerate(deps):
+        base, pkg_name = _parse_dependency(dep)
+        if pkg_name in versions:
+            new_dep = f"{base}>={versions[pkg_name]}"
+            if dep != new_dep:
+                changes.append((dep, new_dep))
+                deps[i] = new_dep
+    return changes
 
 
 def update_dependencies(pyproject_path: Path, lock_path: Path) -> None:
     """Update pyproject.toml dependencies based on uv.lock."""
     try:
-        # Read files
         print("\nReading project files...")
         pyproject = tomllib.loads(pyproject_path.read_text())
-        lock_content = lock_path.read_text().split("\n")
 
-        # Parse lock file
         print("\nParsing lock file...")
-        versions = {}
-        for i, line in enumerate(lock_content):
-            if 'name = "' in line:
-                name = line.split('"')[1].lower()
-                if i + 1 < len(lock_content) and 'version = "' in lock_content[i + 1]:
-                    versions[name] = lock_content[i + 1].split('"')[1]
+        versions = _parse_lock_versions(lock_path)
         print(f"Found {len(versions)} packages in lock file")
 
-        # Update main dependencies
         print("\nUpdating dependencies...")
         updated_count = 0
 
+        # Update main dependencies
         if deps := pyproject.get("project", {}).get("dependencies"):
-            print("\nMain dependencies:")
-            for i, dep in enumerate(deps):
-                pkg_name, extras = clean_dependency(dep)
-                if pkg_name in versions:
-                    old_dep = deps[i]
-                    new_dep = f"{pkg_name}{extras}>={versions[pkg_name]}"
-                    if old_dep != new_dep:
-                        deps[i] = new_dep
-                        print(f"  {old_dep} -> {new_dep}")
-                        updated_count += 1
+            changes = _update_dep_list(deps, versions)
+            if changes:
+                print("\nMain dependencies:")
+                for old, new in changes:
+                    print(f"  {old} -> {new}")
+                updated_count += len(changes)
 
         # Update dependency groups
         if groups := pyproject.get("dependency-groups"):
             for group_name, deps in groups.items():
-                print(f"\n{group_name} dependencies:")
-                for i, dep in enumerate(deps):
-                    pkg_name, extras = clean_dependency(dep)
-                    if pkg_name in versions:
-                        old_dep = deps[i]
-                        new_dep = f"{pkg_name}{extras}>={versions[pkg_name]}"
-                        if old_dep != new_dep:
-                            deps[i] = new_dep
-                            print(f"  {old_dep} -> {new_dep}")
-                            updated_count += 1
+                changes = _update_dep_list(deps, versions)
+                if changes:
+                    print(f"\n{group_name} dependencies:")
+                    for old, new in changes:
+                        print(f"  {old} -> {new}")
+                    updated_count += len(changes)
 
         # Write updated pyproject.toml
         if updated_count > 0:
             print(f"\nWriting updated pyproject.toml ({updated_count} dependencies updated)...")
-            pyproject_path.write_bytes(tomli_w.dumps(pyproject).encode())
+            with pyproject_path.open("wb") as f:
+                tomli_w.dump(pyproject, f)
             print("✓ Successfully updated pyproject.toml")
         else:
             print("\n✓ No updates needed - all dependencies are already up to date")

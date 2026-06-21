@@ -1,4 +1,5 @@
-from typing import Any, Generic, Sequence, Type, TypeVar
+from collections.abc import Sequence
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -21,11 +22,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     providing basic CRUD operations for a given SQLAlchemy model.
     """
 
-    def __init__(self, model: Type[ModelType]) -> None:
+    def __init__(self, model: type[ModelType]) -> None:
         """
         Initialize the CRUDBase class with the model type.
         Args:
-            model (Type[ModelType]): SQLAlchemy model class
+            model (type[ModelType]): SQLAlchemy model class
         """
         self.model = model
 

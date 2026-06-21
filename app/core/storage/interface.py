@@ -1,5 +1,6 @@
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator, Protocol
+from typing import Protocol
 
 from fastapi import UploadFile
 

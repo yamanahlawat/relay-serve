@@ -1,24 +1,24 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from app.mcp_server.dependencies import get_mcp_server_service
+from app.mcp_server.dependencies import MCPServerServiceDep
 from app.mcp_server.exceptions import MCPServerError
 from app.mcp_server.schema import (
     MCPServerCreate,
     MCPServerResponse,
     MCPServerUpdate,
 )
-from app.mcp_server.service import MCPServerDomainService
 
 router = APIRouter(prefix="/mcp", tags=["Model Context Protocol"])
 
 
 @router.get("/", response_model=list[MCPServerResponse])
 async def list_mcp_servers(
-    offset: int = 0,
-    limit: int = 10,
-    service: MCPServerDomainService = Depends(get_mcp_server_service),
+    service: MCPServerServiceDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> list[MCPServerResponse]:
     """
     ## List All MCP Servers
@@ -37,7 +37,7 @@ async def list_mcp_servers(
 @router.post("/", response_model=MCPServerResponse)
 async def create_mcp_server(
     server: MCPServerCreate,
-    service: MCPServerDomainService = Depends(get_mcp_server_service),
+    service: MCPServerServiceDep,
 ) -> MCPServerResponse:
     """
     ## Create MCP Server
@@ -58,8 +58,8 @@ async def create_mcp_server(
 @router.put("/{server_id}", response_model=MCPServerResponse)
 async def update_mcp_server(
     server: MCPServerUpdate,
-    server_id: UUID = Path(title="The ID of the MCP server"),
-    service: MCPServerDomainService = Depends(get_mcp_server_service),
+    server_id: Annotated[UUID, Path(title="The ID of the MCP server")],
+    service: MCPServerServiceDep,
 ) -> MCPServerResponse:
     """
     ## Update MCP Server
@@ -86,8 +86,8 @@ async def update_mcp_server(
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mcp_server(
-    server_id: UUID = Path(title="The ID of the MCP server"),
-    service: MCPServerDomainService = Depends(get_mcp_server_service),
+    server_id: Annotated[UUID, Path(title="The ID of the MCP server")],
+    service: MCPServerServiceDep,
 ) -> None:
     """
     ## Delete MCP Server

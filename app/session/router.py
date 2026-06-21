@@ -1,13 +1,13 @@
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from app.session.dependencies import get_chat_session_service
+from app.session.dependencies import ChatSessionServiceDep
 from app.session.exceptions import SessionNotFoundException
 from app.session.model import ChatSession
 from app.session.schema import SessionCreate, SessionRead, SessionUpdate
-from app.session.service import ChatSessionService
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/sessions", tags=["Sessions"])
 @router.post("/", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
 async def create_chat_session(
     session_in: SessionCreate,
-    service: ChatSessionService = Depends(get_chat_session_service),
+    service: ChatSessionServiceDep,
 ) -> ChatSession:
     """
     ## Create Chat Session
@@ -39,10 +39,10 @@ async def create_chat_session(
 
 @router.get("/", response_model=list[SessionRead])
 async def list_chat_sessions(
-    offset: int = 0,
-    limit: int = 10,
+    service: ChatSessionServiceDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
     title: str | None = None,
-    service: ChatSessionService = Depends(get_chat_session_service),
 ) -> Sequence[ChatSession]:
     """
     ## List Chat Sessions
@@ -64,7 +64,7 @@ async def list_chat_sessions(
 @router.get("/{session_id}/", response_model=SessionRead)
 async def get_chat_session(
     session_id: UUID,
-    service: ChatSessionService = Depends(get_chat_session_service),
+    service: ChatSessionServiceDep,
 ) -> ChatSession:
     """
     ## Get Chat Session
@@ -89,7 +89,7 @@ async def get_chat_session(
 async def update_chat_session(
     session_in: SessionUpdate,
     session_id: UUID,
-    service: ChatSessionService = Depends(get_chat_session_service),
+    service: ChatSessionServiceDep,
 ) -> ChatSession | None:
     """
     ## Update Chat Session
@@ -117,7 +117,7 @@ async def update_chat_session(
 @router.delete("/{session_id}/", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
     session_id: UUID,
-    service: ChatSessionService = Depends(get_chat_session_service),
+    service: ChatSessionServiceDep,
 ) -> None:
     """
     ## Delete Chat Session
